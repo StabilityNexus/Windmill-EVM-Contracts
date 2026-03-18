@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/core/WindmillExchange.sol";
-import "../src/interface/IWindmill.sol";
+import "../src/interface/IWindmillExchange.sol";
 import "../src/libraries/PriceLib.sol";
 
 // Minimal ERC-20 we mint freely in tests
@@ -314,7 +314,7 @@ contract WindmillExchangeTest is Test {
         uint256 takerBefore = tokenA.balanceOf(taker); // seller receives tokenA
 
         vm.expectEmit(true, true, false, false);
-        emit IWindmill.OrderMatched(buyId, sellId, 0, 0, 0, address(this));
+        emit IWindmillExchange.OrderMatched(buyId, sellId, 0, 0, 0, address(this));
 
         exchange.matchOrders(buyId, sellId);
 

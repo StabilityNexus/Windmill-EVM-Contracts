@@ -28,6 +28,8 @@ library PriceMath {
         // casting is safe because elapsed derives from block.timestamp and cannot exceed int256 max
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 elapsedInt = int256(elapsed);
+        // Guard against startPrice overflow before casting.
+        require(startPrice <= uint256(type(int256).max), "PriceMath: startPrice overflows int256");
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 priceInt = int256(startPrice) + (slope * elapsedInt);
         if (priceInt < 0) revert PriceMath_NegativePrice();

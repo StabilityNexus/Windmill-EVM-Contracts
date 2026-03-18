@@ -1,5 +1,5 @@
 # Windmill EVM Contracts — Foundry configuration
-# Template-compatible; Solidity 0.8.20, optimizer, fuzz, remappings for OpenZeppelin
+# Template-compatible; Solidity 0.8.24, optimizer, fuzz, remappings for OpenZeppelin
 
 [profile.default]
 src = "src"

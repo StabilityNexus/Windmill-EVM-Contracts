@@ -55,6 +55,13 @@ contract Windmill is IWindmill {
         if (tokenIn == address(0) || tokenOut == address(0) || amount == 0)
             revert Windmill_InvalidOrder();
 
+        // Measure actual received to handle fee-on-transfer / rebasing tokens.
+        uint256 balanceBefore = IERC20(tokenIn).balanceOf(address(this));
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(tokenIn).balanceOf(address(this));
+        uint256 amountReceived = balanceAfter - balanceBefore;
+        if (amountReceived == 0) revert Windmill_ZeroAmount();
+
         orderId = nextOrderId++;
         _orders[orderId] = Order({
             owner: msg.sender,
@@ -63,13 +70,10 @@ contract Windmill is IWindmill {
             startPrice: startPrice,
             slope: slope,
             startTime: block.timestamp,
-            remainingAmount: amount,
+            remainingAmount: amountReceived,
             isBuy: isBuy,
             active: true
         });
-
-        // CEI: state updated; then external call (transfer in).
-        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amount);
 
         emit OrderCreated(
             orderId,
@@ -79,7 +83,7 @@ contract Windmill is IWindmill {
             startPrice,
             slope,
             block.timestamp,
-            amount,
+            amountReceived,
             isBuy
         );
         return orderId;
@@ -113,6 +117,8 @@ contract Windmill is IWindmill {
         );
         // 4. Price cross validation (settlement at sellPrice)
         if (buyPrice < sellPrice) revert Windmill_PriceNotCrossed();
+        // Reject zero-price settlements — would let buyers receive tokens for free.
+        if (sellPrice == 0) revert Windmill_ZeroAmount();
 
         // Settlement at sellPrice (maker price).
         // SELL.remainingAmount = base; BUY.remainingAmount = quote. Unit-consistent: tradeBase in base, tradeQuote in quote.
@@ -121,10 +127,15 @@ contract Windmill is IWindmill {
         uint256 tradeBase = sell.remainingAmount < maxBaseFromBuy
             ? sell.remainingAmount
             : maxBaseFromBuy;
-        uint256 tradeQuote = (tradeBase * sellPrice) / PRICE_SCALE;
+        // Ceil-round tradeQuote so it is never zero when tradeBase > 0:
+        // tradeQuote = ceil(tradeBase * sellPrice / PRICE_SCALE)
+        uint256 tradeQuote = (tradeBase * sellPrice + PRICE_SCALE - 1) / PRICE_SCALE;
 
         // 5. Trade > 0 validation
-        if (tradeBase == 0) revert Windmill_ZeroAmount();
+        if (tradeBase == 0 || tradeQuote == 0) revert Windmill_ZeroAmount();
+
+        // Ensure buy order has enough remaining quote to cover ceil-rounded tradeQuote.
+        if (tradeQuote > buy.remainingAmount) revert Windmill_InvalidMatch();
 
         // Effects first (CEI): decrease remaining in same units (base for sell, quote for buy).
         sell.remainingAmount -= tradeBase;

@@ -5,10 +5,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import "../interface/IWindmill.sol";
+import "../interface/IWindmillExchange.sol";
 import "../libraries/PriceLib.sol";
 
-contract WindmillExchange is IWindmill, ReentrancyGuard {
+contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct Order {
@@ -119,12 +119,17 @@ contract WindmillExchange is IWindmill, ReentrancyGuard {
             expiry
         );
 
-        // Interaction last — CEI: all state written before external call
+        // Measure actual received to reject fee-on-transfer / rebasing tokens.
+        uint256 balanceBefore = IERC20(sellToken).balanceOf(address(this));
         IERC20(sellToken).safeTransferFrom(
             msg.sender,
             address(this),
             sellAmount
         );
+        uint256 balanceAfter = IERC20(sellToken).balanceOf(address(this));
+        uint256 received = balanceAfter - balanceBefore;
+        require(received == sellAmount, "Fee-on-transfer tokens not supported");
+        // remainingSell was already set to sellAmount above; confirmed equal.
     }
 
     //  cancelOrder
@@ -205,9 +210,11 @@ contract WindmillExchange is IWindmill, ReentrancyGuard {
             buy.remainingBuy,
             maxSellBySellerDemand
         );
-        uint256 fillBuy = (fillSell * settlementPrice) / 1e18;
-
         require(fillSell > 0, "Zero-fill");
+        // Ceiling division: ensure fillBuy is never 0 when fillSell > 0 to prevent free-token fills.
+        uint256 fillBuy = (fillSell * settlementPrice + 1e18 - 1) / 1e18;
+        require(fillBuy > 0, "Zero-fill quote");
+        require(fillBuy <= buy.remainingSell, "fillBuy exceeds buyer remaining");
 
         buy.remainingSell -= fillBuy;
         buy.remainingBuy -= fillSell;

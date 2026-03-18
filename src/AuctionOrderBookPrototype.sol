@@ -76,16 +76,13 @@ contract AuctionOrderBookPrototype {
     ) external payable returns (uint256 orderId) {
         require(amount > 0, "Amount must be > 0");
         require(startPrice > 0, "Start price must be > 0");
+        require(startPrice <= uint256(type(int256).max), "startPrice overflows int256");
+        require(!isBuy, "Buy-side orders not supported");
         require(expiryTime == 0 || expiryTime > block.timestamp, "Invalid expiry");
 
+        require(msg.value == 0, "Sell order should not send ETH");
+
         uint256 escrowedEth = 0;
-        if (isBuy) {
-            uint256 maxCost = amount * startPrice;
-            require(msg.value == maxCost, "Buy order needs exact ETH escrow");
-            escrowedEth = maxCost;
-        } else {
-            require(msg.value == 0, "Sell order should not send ETH");
-        }
 
         orderId = nextOrderId++;
 
@@ -230,6 +227,32 @@ contract AuctionOrderBookPrototype {
 
         _deactivateOrder(orderId);
         emit OrderExpired(orderId, msg.sender);
+    }
+
+    /**
+     * @notice Prune an order whose currentPrice() returns 0 due to stop-price crossing or full price decay.
+     * @dev State-changing companion to the view-only currentPrice(). Callable by anyone.
+     *      Releases any remaining escrow to the creator and removes from activeOrderIds.
+     *      Does NOT handle expiry (use expireOrder for that).
+     * @param orderId The order id to prune.
+     */
+    function pruneOrder(uint256 orderId) external nonReentrant {
+        Order storage order = orders[orderId];
+        require(order.active, "Order not active");
+        require(!isExpired(orderId), "Use expireOrder for expired orders");
+        require(currentPrice(orderId) == 0, "Order still has valid price");
+
+        if (order.isBuy) {
+            uint256 refund = order.escrowedEth;
+            order.escrowedEth = 0;
+            if (refund > 0) {
+                (bool success,) = payable(order.creator).call{value: refund}("");
+                require(success, "Refund failed");
+            }
+        }
+
+        _deactivateOrder(orderId);
+        emit OrderCancelled(orderId);
     }
 
     function getActiveOrderIds() external view returns (uint256[] memory) {

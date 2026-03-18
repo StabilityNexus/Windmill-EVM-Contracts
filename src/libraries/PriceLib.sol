@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "../interface/IWindmill.sol";
+import "../interface/IWindmillExchange.sol";
 
 /// @title PriceLib
 /// @notice Pure WAD price math for Windmill ductch auction orders not storage reads , no transfers - just the math
