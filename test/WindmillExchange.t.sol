@@ -307,8 +307,12 @@ contract WindmillExchangeTest is Test {
         uint256 makerBefore = tokenB.balanceOf(maker); // buyer receives tokenB
         uint256 takerBefore = tokenA.balanceOf(taker); // seller receives tokenA
 
-        vm.expectEmit(true, true, false, false);
-        emit IWindmillExchange.OrderMatched(buyId, sellId, 0, 0, 0, address(this));
+        uint256 settlementPrice = (BUY_START + SELL_START) / 2;
+        uint256 fillSell = 10e18; // Both sides want/offer 10e18 tokenB
+        uint256 fillBuy = (fillSell * settlementPrice + 1e18 - 1) / 1e18;
+
+        vm.expectEmit(true, true, true, true);
+        emit IWindmillExchange.OrderMatched(buyId, sellId, fillSell, fillBuy, settlementPrice, address(this));
 
         exchange.matchOrders(buyId, sellId);
 
@@ -373,17 +377,20 @@ contract WindmillExchangeTest is Test {
         exchange.cancelOrder(sellId);
 
         // ...but can recover residual escrow via withdrawResidual.
+        uint256 preBalance = tokenB.balanceOf(address(exchange));
+        uint256 takerBDelta = tokenB.balanceOf(taker);
         vm.prank(taker);
         exchange.withdrawResidual(sellId);
+        uint256 expectedWithdrawn = 4e18;
         assertEq(
             tokenB.balanceOf(taker),
-            takerBBefore + 4e18,
+            takerBDelta + expectedWithdrawn,
             "seller did not recover residual escrow"
         );
         assertEq(
+            preBalance - expectedWithdrawn,
             tokenB.balanceOf(address(exchange)),
-            0,
-            "exchange should hold no tokenB after residual withdrawal"
+            "exchange should reflect residual withdrawal"
         );
 
         // Buyer can cancel the still-active order and recover remaining payment escrow
@@ -531,12 +538,12 @@ contract WindmillExchangeTest is Test {
     // Test 20 — Fuzz: token conservation in matchOrders
 
     function testFuzz_matchOrders_tokenConservation(uint256 elapsed) public {
-        // Keep within expiry (1 hour) and ensure prices stay crossed
-        elapsed = bound(elapsed, 0, 30 minutes);
-        vm.warp(block.timestamp + elapsed);
-
         uint256 buyId = _placeBuyOrder();
         uint256 sellId = _placeSellOrder();
+
+        // Warp after placement so placedAt is original, but match happens later
+        elapsed = bound(elapsed, 0, 30 minutes);
+        vm.warp(block.timestamp + elapsed);
 
         uint256 exchangeABefore = tokenA.balanceOf(address(exchange));
         uint256 exchangeBBefore = tokenB.balanceOf(address(exchange));

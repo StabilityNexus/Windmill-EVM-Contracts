@@ -17,6 +17,13 @@ contract AuctionOrderBookPrototypeTest is Test {
     }
 
 
+    function test_createOrder_revertsStartPriceOverflow() public {
+        uint256 overflowPrice = uint256(type(int256).max) + 1;
+        vm.prank(maker);
+        vm.expectRevert("startPrice overflows int256");
+        book.createOrder(false, 10, overflowPrice, 0, 0, 0);
+    }
+
 
     function test_createBuyOrder_revertsUnsupported() public {
         vm.prank(maker);
@@ -100,5 +107,59 @@ contract AuctionOrderBookPrototypeTest is Test {
         // Sell orders have no ETH escrow; maker balance unchanged.
         assertEq(maker.balance, makerBefore);
         assertEq(book.getActiveOrderCount(), 0);
+    }
+
+    function test_pruneOrder_deactivatesAndRemoves() public {
+        vm.prank(maker);
+        // Sell order with start 0.01 and slope -0.01/sec => price 0 after 1 sec
+        uint256 id = book.createOrder(false, 10, 0.01 ether, -0.01 ether, 0, 0);
+        
+        vm.warp(block.timestamp + 1);
+        assertEq(book.currentPrice(id), 0);
+        assertFalse(book.isExpired(id));
+        
+        uint256 countBefore = book.getActiveOrderCount();
+        book.pruneOrder(id);
+        
+        AuctionOrderBookPrototype.Order memory o = book.getOrder(id);
+        assertFalse(o.active);
+        assertEq(book.getActiveOrderCount(), countBefore - 1);
+        
+        uint256[] memory activeIds = book.getActiveOrderIds();
+        bool found = false;
+        for (uint i = 0; i < activeIds.length; i++) {
+            if (activeIds[i] == id) found = true;
+        }
+        assertFalse(found);
+    }
+
+    function test_pruneOrder_revertsIfActiveOrHigherPrice() public {
+        vm.prank(maker);
+        uint256 id = book.createOrder(false, 10, 0.01 ether, 0, 0, 0);
+        
+        vm.expectRevert("Order still has valid price");
+        book.pruneOrder(id);
+    }
+
+    function test_pruneOrder_revertsIfInactive() public {
+        vm.prank(maker);
+        uint256 id = book.createOrder(false, 10, 0.01 ether, 0, 0, 0);
+        
+        vm.prank(maker);
+        book.cancelOrder(id);
+        
+        vm.expectRevert("Order not active");
+        book.pruneOrder(id);
+    }
+
+    function test_pruneOrder_revertsOnExpired() public {
+        vm.prank(maker);
+        uint256 id = book.createOrder(false, 10, 0.01 ether, 0, 0, block.timestamp + 10);
+        
+        vm.warp(block.timestamp + 11);
+        // Before calling pruneOrder, we should check if expireOrder works
+        // But the user specifically asked for negative test on pruneOrder for expired
+        vm.expectRevert("Use expireOrder for expired orders");
+        book.pruneOrder(id);
     }
 }

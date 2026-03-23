@@ -22,5 +22,6 @@ fuzz = { runs = 256 }
 # Remappings (OpenZeppelin and forge-std)
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin/contracts/security/ReentrancyGuard.sol=lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol",
     "forge-std/=lib/forge-std/src/"
 ]

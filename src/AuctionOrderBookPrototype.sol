@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
 /**
  * @title AuctionOrderBookPrototype
  * @notice MVP for testing lazy, user-triggered auction-based order execution
  * @dev Each order has a time-dependent price function evaluated at execution time
  */
-contract AuctionOrderBookPrototype {
+contract AuctionOrderBookPrototype is ReentrancyGuard {
     struct Order {
         address creator;
         bool isBuy;           // true = buy order (decreasing price), false = sell order (increasing price)
@@ -26,7 +28,7 @@ contract AuctionOrderBookPrototype {
     uint256[] public activeOrderIds;
     mapping(uint256 => uint256) private activeOrderIndex; // orderId => index in activeOrderIds
 
-    bool private locked;
+
 
     event OrderCreated(
         uint256 indexed orderId,
@@ -51,12 +53,7 @@ contract AuctionOrderBookPrototype {
     event OrderExpired(uint256 indexed orderId, address indexed caller);
     event OrderPruned(uint256 indexed orderId, address indexed caller);
 
-    modifier nonReentrant() {
-        require(!locked, "Reentrancy blocked");
-        locked = true;
-        _;
-        locked = false;
-    }
+
 
     /**
      * @notice Create a new auction order with time-dependent pricing
@@ -128,8 +125,11 @@ contract AuctionOrderBookPrototype {
             int256 priceChange = order.priceSlope * int256(elapsed);
             if (order.priceSlope != 0 && priceChange / order.priceSlope != int256(elapsed)) return 0;
             
-            int256 calculatedPrice = int256(order.startPrice) + priceChange;
-            if (priceChange != calculatedPrice - int256(order.startPrice)) return 0;
+            int256 start = int256(order.startPrice);
+            if (priceChange > 0 && start > type(int256).max - priceChange) return 0;
+            if (priceChange < 0 && start < type(int256).min - priceChange) return 0;
+
+            int256 calculatedPrice = start + priceChange;
 
             if (calculatedPrice <= 0) {
                 return 0;
@@ -175,6 +175,7 @@ contract AuctionOrderBookPrototype {
         require(price > 0, "Order stopped or invalid price");
 
         uint256 totalCost = amount * price;
+        require(price == 0 || totalCost / price == amount, "Overflow in totalCost calculation");
 
         if (order.isBuy) {
             revert("Buy settlement not implemented");
@@ -201,10 +202,11 @@ contract AuctionOrderBookPrototype {
         require(msg.sender == order.creator, "Not order creator");
 
         if (order.isBuy) {
-            uint256 refund = order.escrowedEth;
-            order.escrowedEth = 0;
-            (bool success,) = payable(order.creator).call{value: refund}("");
-            require(success, "Refund failed");
+            // Reserved for future buy-side support:
+            // uint256 refund = order.escrowedEth;
+            // order.escrowedEth = 0;
+            // (bool success,) = payable(order.creator).call{value: refund}("");
+            // require(success, "Refund failed");
         }
 
         _deactivateOrder(orderId);

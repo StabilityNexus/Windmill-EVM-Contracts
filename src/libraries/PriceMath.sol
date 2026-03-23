@@ -8,6 +8,8 @@ pragma solidity ^0.8.20;
  */
 library PriceMath {
     error PriceMath_NegativePrice();
+    error PriceMath_StartPriceOverflow();
+    error PriceMath_TimestampElapsedOverflow();
 
     /// @notice Compute price at a given timestamp. Reverts if result < 0.
     /// @param startPrice Initial price (uint256).
@@ -25,10 +27,10 @@ library PriceMath {
             return startPrice;
         }
         uint256 elapsed = timestamp - startTime;
-        // casting is safe because elapsed = timestamp - startTime; Solidity 0.8 checked arithmetic will revert on any overflow.
-        // forge-lint: disable-next-line(unsafe-typecast)
+        // Ensure elapsed doesn't overflow int256
+        if (elapsed > uint256(type(int256).max)) revert PriceMath_TimestampElapsedOverflow();
         int256 elapsedInt = int256(elapsed);
-        require(startPrice <= uint256(type(int256).max), "PriceMath: startPrice overflows int256");
+        if (startPrice > uint256(type(int256).max)) revert PriceMath_StartPriceOverflow();
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 priceInt = int256(startPrice) + (slope * elapsedInt);
         if (priceInt < 0) revert PriceMath_NegativePrice();
