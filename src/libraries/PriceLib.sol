@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "../interface/IWindmillExchange.sol";
-
-/// @title PriceLib
-/// @notice Pure WAD price math for Windmill ductch auction orders not storage reads , no transfers - just the math
+/// @notice Pure WAD price math for Windmill dutch auction orders not storage reads , no transfers - just the math
 
 library PriceLib {
-    uint256 internal constant WAD = 1e18;
     /// @notice Returns the WAD price of an order at a given timestamp
     /// @param startPrice  WAD price at placeAt
     /// @param slope WAD/seconds; negative = buy , positive = sell
@@ -22,14 +18,16 @@ library PriceLib {
         uint256 placedAt,
         uint256 endPriceTimestamp
     ) internal pure returns (uint256) {
-        // no time has passed - return starting price
-        if (endPriceTimestamp <= placedAt) return startPrice;
+
 
         uint256 timeElapsed = endPriceTimestamp - placedAt;
 
+        uint256 absSlope = slope < 0 ? uint256(-slope) : uint256(slope);
+        require(timeElapsed == 0 || absSlope <= type(uint256).max / timeElapsed, "PriceLib: slope * timeElapsed overflow");
+
         if (slope < 0) {
             // BUY order : price falls , slope is negative so we negate it
-            uint256 decay = uint256(-slope) * timeElapsed;
+            uint256 decay = absSlope * timeElapsed;
             // Clamp : if decay exceeds startPrice, return 0 (fully decayed)
             uint256 raw = decay >= startPrice ? 0 : startPrice - decay;
             // never go below endPrice floor
@@ -37,7 +35,7 @@ library PriceLib {
             return raw < endPrice ? endPrice : raw;
         } else {
             // sell order : price rises
-            uint256 raw = startPrice + uint256(slope) * timeElapsed;
+            uint256 raw = startPrice + absSlope * timeElapsed;
             // never go above endPrice ceiling
             return raw > endPrice ? endPrice : raw;
         }

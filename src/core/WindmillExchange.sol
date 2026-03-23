@@ -64,7 +64,7 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
         require(buyToken != address(0), "buyToken is zero address");
         require(sellToken != address(0), "sellToken is zero address");
         require(buyToken != sellToken, "buyToken == sellToken");
-        require(slope != 0, "slope is zero");
+        require(!(slope == 0 && startPrice != endPrice), "invalid slope/price combination");
 
         uint256 slopeAbs = slope < 0 ? uint256(-slope) : uint256(slope);
         require(
@@ -198,7 +198,7 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
 
         require(bp >= sp, "Prices have not crossed");
 
-        uint256 settlementPrice = (bp + sp) / 2;
+        uint256 settlementPrice = sp + (bp - sp) / 2;
 
         uint256 maxSellFromBuyer = (buy.remainingSell * 1e18) / settlementPrice;
         // Convert seller demand (buy-token units) into max sell-token units.
@@ -279,5 +279,14 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
                 o.placedAt,
                 timestamp
             );
+    }
+
+    function pairOrdersLength(bytes32 pairKey) external view returns (uint256) {
+        return pairOrders[pairKey].length;
+    }
+
+    function getRemainingBalances(uint256 orderId) external view returns (uint256 remainingBuy, uint256 remainingSell) {
+        Order storage o = _orders[orderId];
+        return (o.remainingBuy, o.remainingSell);
     }
 }

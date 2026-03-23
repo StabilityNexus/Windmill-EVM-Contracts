@@ -52,7 +52,7 @@ contract Windmill is IWindmill {
         uint256 amount,
         bool isBuy
     ) external returns (uint256 orderId) {
-        if (tokenIn == address(0) || tokenOut == address(0) || amount == 0)
+        if (tokenIn == address(0) || tokenOut == address(0) || amount == 0 || tokenIn == tokenOut || startPrice == 0)
             revert Windmill_InvalidOrder();
 
         // Measure actual received to handle fee-on-transfer / rebasing tokens.

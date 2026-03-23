@@ -23,7 +23,7 @@ contract MockERC20Test is Test {
 
     function test_Transfer() public {
         token.mint(address(this), 100e18);
-        require(token.transfer(address(0x1), 40e18));
+        assertTrue(token.transfer(address(0x1), 40e18));
         assertEq(token.balanceOf(address(this)), 60e18);
         assertEq(token.balanceOf(address(0x1)), 40e18);
     }
