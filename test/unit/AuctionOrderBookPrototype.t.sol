@@ -16,16 +16,7 @@ contract AuctionOrderBookPrototypeTest is Test {
         vm.deal(taker, 1000 ether);
     }
 
-    function _createBuyOrder(
-        uint256 amount,
-        uint256 startPrice,
-        int256 slope,
-        uint256 stopPrice,
-        uint256 expiryTime
-    ) internal returns (uint256) {
-        vm.prank(maker);
-        return book.createOrder{value: amount * startPrice}(true, amount, startPrice, slope, stopPrice, expiryTime);
-    }
+
 
     function test_createBuyOrder_revertsUnsupported() public {
         vm.prank(maker);

@@ -7,13 +7,7 @@ import "../src/core/WindmillExchange.sol";
 import "../src/interface/IWindmillExchange.sol";
 import "../src/libraries/PriceLib.sol";
 
-// Minimal ERC-20 we mint freely in tests
-contract MockERC20 is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
+import "../src/mocks/MockERC20.sol";
 
 contract WindmillExchangeTest is Test {
     WindmillExchange exchange;

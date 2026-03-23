@@ -49,6 +49,7 @@ contract AuctionOrderBookPrototype {
 
     event OrderCancelled(uint256 indexed orderId);
     event OrderExpired(uint256 indexed orderId, address indexed caller);
+    event OrderPruned(uint256 indexed orderId, address indexed caller);
 
     modifier nonReentrant() {
         require(!locked, "Reentrancy blocked");
@@ -123,14 +124,19 @@ contract AuctionOrderBookPrototype {
 
         uint256 elapsed = block.timestamp - order.startTime;
 
-        int256 priceChange = order.priceSlope * int256(elapsed);
-        int256 calculatedPrice = int256(order.startPrice) + priceChange;
+        unchecked {
+            int256 priceChange = order.priceSlope * int256(elapsed);
+            if (order.priceSlope != 0 && priceChange / order.priceSlope != int256(elapsed)) return 0;
+            
+            int256 calculatedPrice = int256(order.startPrice) + priceChange;
+            if (priceChange != calculatedPrice - int256(order.startPrice)) return 0;
 
-        if (calculatedPrice <= 0) {
-            return 0;
+            if (calculatedPrice <= 0) {
+                return 0;
+            }
+
+            price = uint256(calculatedPrice);
         }
-
-        price = uint256(calculatedPrice);
 
         if (order.stopPrice > 0) {
             if (order.isBuy && price <= order.stopPrice) {
@@ -252,7 +258,7 @@ contract AuctionOrderBookPrototype {
         }
 
         _deactivateOrder(orderId);
-        emit OrderCancelled(orderId);
+        emit OrderPruned(orderId, msg.sender);
     }
 
     function getActiveOrderIds() external view returns (uint256[] memory) {

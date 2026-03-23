@@ -25,10 +25,9 @@ library PriceMath {
             return startPrice;
         }
         uint256 elapsed = timestamp - startTime;
-        // casting is safe because elapsed derives from block.timestamp and cannot exceed int256 max
+        // casting is safe because elapsed = timestamp - startTime; Solidity 0.8 checked arithmetic will revert on any overflow.
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 elapsedInt = int256(elapsed);
-        // Guard against startPrice overflow before casting.
         require(startPrice <= uint256(type(int256).max), "PriceMath: startPrice overflows int256");
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 priceInt = int256(startPrice) + (slope * elapsedInt);
