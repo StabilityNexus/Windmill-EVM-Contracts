@@ -31,6 +31,8 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
     uint256 public nextOrderId;
     mapping(uint256 => Order) internal _orders;
     mapping(bytes32 => uint256[]) public pairOrders;
+    mapping(uint256 => bytes32) private _orderPairKey;
+    mapping(uint256 => uint256) private _orderPairIndex;
 
     function _min2(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
@@ -64,7 +66,7 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
         require(buyToken != address(0), "buyToken is zero address");
         require(sellToken != address(0), "sellToken is zero address");
         require(buyToken != sellToken, "buyToken == sellToken");
-        require(!(slope == 0 && startPrice != endPrice), "invalid slope/price combination");
+
 
         uint256 slopeAbs = slope < 0 ? uint256(-slope) : uint256(slope);
         require(
@@ -77,10 +79,16 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
                 endPrice < startPrice,
                 "BUY: endPrice must be below startPrice"
             );
-        } else {
+        } else if (slope > 0) {
             require(
                 endPrice > startPrice,
                 "SELL: endPrice must be above startPrice"
+            );
+        } else {
+            // slope == 0: fixed price order
+            require(
+                startPrice == endPrice,
+                "FIXED: endPrice must equal startPrice"
             );
         }
 
@@ -105,6 +113,8 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
         });
 
         bytes32 key = keccak256(abi.encode(buyToken, sellToken));
+        _orderPairKey[orderId] = key;
+        _orderPairIndex[orderId] = pairOrders[key].length;
         pairOrders[key].push(orderId);
 
         emit OrderPlaced(
@@ -142,9 +152,28 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
         uint256 refund = o.remainingSell;
         o.remainingSell = 0;
 
+        _removeFromPairOrders(orderId);
+
         emit OrderCancelled(orderId, msg.sender, refund);
 
         IERC20(o.sellToken).safeTransfer(msg.sender, refund);
+    }
+
+    /// @dev Swap-and-pop orderId out of its pairOrders array to keep it bounded.
+    function _removeFromPairOrders(uint256 orderId) internal {
+        bytes32 key = _orderPairKey[orderId];
+        if (key == bytes32(0)) return; // already removed or never tracked
+        uint256[] storage arr = pairOrders[key];
+        uint256 idx  = _orderPairIndex[orderId];
+        uint256 last = arr.length - 1;
+        if (idx != last) {
+            uint256 lastId = arr[last];
+            arr[idx] = lastId;
+            _orderPairIndex[lastId] = idx;
+        }
+        arr.pop();
+        delete _orderPairIndex[orderId];
+        delete _orderPairKey[orderId];
     }
 
     //  withdrawResidual — lets maker recover escrowed sellToken after auto-deactivation
@@ -225,6 +254,9 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
         if (sell.remainingBuy == 0 || sell.remainingSell == 0)
             sell.active = false;
 
+        if (!buy.active)  _removeFromPairOrders(buyOrderId);
+        if (!sell.active) _removeFromPairOrders(sellOrderId);
+
         emit OrderMatched(
             buyOrderId,
             sellOrderId,
@@ -239,6 +271,8 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
     }
 
     //  Read functions
+
+    /// @notice Full order snapshot — all 14 fields in one call for keeper efficiency.
     function getOrder(
         uint256 orderId
     )
@@ -251,7 +285,14 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
             uint256 buyAmount,
             uint256 sellAmount,
             uint256 expiry,
-            bool active
+            bool    active,
+            uint256 startPrice,
+            int256  slope,
+            uint256 endPrice,
+            uint256 placedAt,
+            uint8   side,         // 0 = BUY, 1 = SELL
+            uint256 remainingBuy,
+            uint256 remainingSell
         )
     {
         Order storage o = _orders[orderId];
@@ -262,7 +303,14 @@ contract WindmillExchange is IWindmillExchange, ReentrancyGuard {
             o.buyAmount,
             o.sellAmount,
             o.expiry,
-            o.active
+            o.active,
+            o.startPrice,
+            o.slope,
+            o.endPrice,
+            o.placedAt,
+            uint8(o.side),
+            o.remainingBuy,
+            o.remainingSell
         );
     }
 

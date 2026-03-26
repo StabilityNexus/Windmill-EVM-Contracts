@@ -60,7 +60,14 @@ interface IWindmillExchange {
             uint256 buyAmount,
             uint256 sellAmount,
             uint256 expiry,
-            bool active
+            bool    active,
+            uint256 startPrice,
+            int256  slope,
+            uint256 endPrice,
+            uint256 placedAt,
+            uint8   side,         // 0 = BUY, 1 = SELL
+            uint256 remainingBuy,
+            uint256 remainingSell
         );
 
     function priceAt(

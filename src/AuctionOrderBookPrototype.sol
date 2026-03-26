@@ -201,13 +201,8 @@ contract AuctionOrderBookPrototype is ReentrancyGuard {
         require(order.active, "Order not active");
         require(msg.sender == order.creator, "Not order creator");
 
-        if (order.isBuy) {
-            // Reserved for future buy-side support:
-            // uint256 refund = order.escrowedEth;
-            // order.escrowedEth = 0;
-            // (bool success,) = payable(order.creator).call{value: refund}("");
-            // require(success, "Refund failed");
-        }
+        // Note: buy orders are rejected at createOrder, so isBuy is always false here.
+        // ETH-escrow refund logic will be added when buy-side is implemented.
 
         _deactivateOrder(orderId);
 

@@ -2,9 +2,11 @@ name: Foundry CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
@@ -26,7 +28,7 @@ jobs:
         run: forge install
 
       - name: Build contracts
-        run: forge build
+        run: forge build --sizes
 
       - name: Run tests
-        run: forge test -vvv
+        run: forge test -vvv --fail-fast

@@ -146,7 +146,8 @@ contract WindmillExchangeTest is Test {
             uint256 retBuyAmt,
             uint256 retSellAmt,
             uint256 retExpiry,
-            bool retActive
+            bool retActive,
+            ,,,,,, // startPrice, slope, endPrice, placedAt, side, remainingBuy, remainingSell
         ) = exchange.getOrder(id);
 
         assertEq(retMaker, maker);
@@ -223,7 +224,7 @@ contract WindmillExchangeTest is Test {
 
         assertEq(tokenA.balanceOf(maker), balBefore + ESCROW_A);
 
-        (, , , , , , bool active) = exchange.getOrder(id);
+        (, , , , , , bool active,,,,,,, ) = exchange.getOrder(id);
         assertFalse(active);
     }
 
@@ -364,11 +365,11 @@ contract WindmillExchangeTest is Test {
         );
 
         // Sell order deactivates because remainingBuy hits zero, while residual sell escrow remains.
-        (, , , , , , bool sellActive) = exchange.getOrder(sellId);
+        (, , , , , , bool sellActive,,,,,,, ) = exchange.getOrder(sellId);
         assertFalse(sellActive);
 
         // Buy order still active after partial fill.
-        (, , , , , , bool buyActive) = exchange.getOrder(buyId);
+        (, , , , , , bool buyActive,,,,,,, ) = exchange.getOrder(buyId);
         assertTrue(buyActive);
 
         // Seller cannot cancel inactive order...
@@ -574,5 +575,31 @@ contract WindmillExchangeTest is Test {
             BUY_END,
             block.timestamp + 1 hours
         );
+    }
+
+    // Test 22 — Fixed Price Order (slope = 0) support [from reviewer kaneki003]
+    function test_matchOrders_fixedPrice() public {
+        // Buyer: Dutch Auction (falling price)
+        uint256 buyId = _placeBuyOrder(); // Starts at 1000e18, Slope -1e15
+
+        // Seller: Fixed Price (slope = 0)
+        uint256 fixedPrice = 950e18;
+        vm.prank(taker);
+        uint256 sellId = exchange.placeOrder(
+            address(tokenA),
+            address(tokenB),
+            10000e18, // wants 10000 tokenA
+            10e18,    // offers 10 tokenB
+            fixedPrice,
+            0,         // slope = 0
+            fixedPrice,
+            block.timestamp + 1 hours
+        );
+
+        // At t=0, buy=1000, sell=950. Matchable!
+        uint256 makerBefore = tokenB.balanceOf(maker);
+        exchange.matchOrders(buyId, sellId);
+
+        assertTrue(tokenB.balanceOf(maker) > makerBefore, "Fixed-price match failed");
     }
 }
