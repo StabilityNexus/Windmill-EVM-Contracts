@@ -70,12 +70,12 @@ library PriceCurve {
         }
 
         if (slope > 0) {
-            uint256 slopeAbs = uint256(slope);
+            uint256 posSlopeAbs = uint256(slope);
 
             unchecked {
-                uint256 increment = slopeAbs * elapsed;
+                uint256 increment = posSlopeAbs * elapsed;
 
-                if (increment / elapsed != slopeAbs) {
+                if (increment / elapsed != posSlopeAbs) {
                     return MathUtils.clamp(
                         maxPrice != 0
                             ? maxPrice

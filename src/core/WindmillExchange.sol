@@ -209,7 +209,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         override
         returns (uint256)
     {
-        return PriceCurve.currentPriceMem(_getOrderMem(orderId), timestamp);
+        return PriceCurve.currentPriceAtTime(_getOrderMem(orderId), timestamp);
     }
 
     function getOrder(uint256 orderId) external view override returns (Order memory) {
