@@ -18,7 +18,7 @@ library PriceCurve {
         );
     }
 
-    function currentPriceMem(Order memory order, uint256 timestamp)
+    function currentPriceAtTime(Order memory order, uint256 timestamp)
         internal
         pure
         returns (uint256)
@@ -33,12 +33,12 @@ library PriceCurve {
         );
     }
 
-    function hasCrossed(Order memory buy, Order memory sell, uint256 timestamp)
+    function isMatchable(Order memory buy, Order memory sell, uint256 timestamp)
         internal
         pure
         returns (bool)
     {
-        return currentPriceMem(buy, timestamp) >= currentPriceMem(sell, timestamp);
+        return currentPriceAtTime(buy, timestamp) >= currentPriceAtTime(sell, timestamp);
     }
 
     function settlementPrice(Order memory buy, Order memory sell, uint256 timestamp)
@@ -46,7 +46,7 @@ library PriceCurve {
         pure
         returns (uint256)
     {
-        return MathUtils.midpoint(currentPriceMem(buy, timestamp), currentPriceMem(sell, timestamp));
+        return MathUtils.midpoint(currentPriceAtTime(buy, timestamp), currentPriceAtTime(sell, timestamp));
     }
 
     function _compute(
@@ -56,37 +56,83 @@ library PriceCurve {
         uint256 minPrice,
         uint256 maxPrice,
         uint256 timestamp
-    ) private pure returns (uint256 price) {
-        uint256 elapsed = timestamp > createdAt ? timestamp - createdAt : 0;
+    ) private pure returns (uint256) {
+        uint256 elapsed = timestamp > createdAt
+            ? timestamp - createdAt
+            : 0;
 
         if (slope == 0 || elapsed == 0) {
-            price = startPrice;
-        } else if (slope > 0) {
-            uint256 slopeAbs = uint256(slope);
-            unchecked {
-                uint256 prod = slopeAbs * elapsed;
-                if (elapsed != 0 && prod / elapsed != slopeAbs) {
-                    price = maxPrice != 0 ? maxPrice : type(uint256).max;
-                    return MathUtils.clamp(price, minPrice, maxPrice);
-                }
-                uint256 newPrice = startPrice + prod;
-                price = newPrice < startPrice ? type(uint256).max : newPrice;
-            }
-        } else {
-            if (slope == type(int256).min) {
-                return MathUtils.clamp(minPrice, minPrice, maxPrice);
-            }
-            uint256 slopeAbs = uint256(-slope);
-            uint256 decrement;
-            unchecked {
-                decrement = slopeAbs * elapsed;
-                if (elapsed != 0 && decrement / elapsed != slopeAbs) {
-                    return MathUtils.clamp(minPrice, minPrice, maxPrice);
-                }
-            }
-            price = decrement >= startPrice ? 0 : startPrice - decrement;
+            return MathUtils.clamp(
+                startPrice,
+                minPrice,
+                maxPrice
+            );
         }
 
-        price = MathUtils.clamp(price, minPrice, maxPrice);
+        if (slope > 0) {
+            uint256 slopeAbs = uint256(slope);
+
+            unchecked {
+                uint256 increment = slopeAbs * elapsed;
+
+                if (increment / elapsed != slopeAbs) {
+                    return MathUtils.clamp(
+                        maxPrice != 0
+                            ? maxPrice
+                            : type(uint256).max,
+                        minPrice,
+                        maxPrice
+                    );
+                }
+
+                uint256 newPrice = startPrice + increment;
+
+                if (newPrice < startPrice) {
+                    return MathUtils.clamp(
+                        type(uint256).max,
+                        minPrice,
+                        maxPrice
+                    );
+                }
+
+                return MathUtils.clamp(
+                    newPrice,
+                    minPrice,
+                    maxPrice
+                );
+            }
+        }
+
+        if (slope == type(int256).min) {
+            return MathUtils.clamp(
+                minPrice,
+                minPrice,
+                maxPrice
+            );
+        }
+
+        uint256 slopeAbs = uint256(-slope);
+
+        unchecked {
+            uint256 decrement = slopeAbs * elapsed;
+
+            if (decrement / elapsed != slopeAbs) {
+                return MathUtils.clamp(
+                    minPrice,
+                    minPrice,
+                    maxPrice
+                );
+            }
+
+            uint256 price = decrement >= startPrice
+                ? 0
+                : startPrice - decrement;
+
+            return MathUtils.clamp(
+                price,
+                minPrice,
+                maxPrice
+            );
+        }
     }
 }

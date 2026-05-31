@@ -9,6 +9,7 @@ import { PriceCurve } from "../libraries/PriceCurve.sol";
 import { TokenTransfer } from "../libraries/TokenTransfer.sol";
 import { MathUtils } from "../libraries/MathUtils.sol";
 import { IWindmillExchange } from "../interfaces/IWindmillExchange.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 error ZeroAddress();
 error SameToken();
@@ -21,29 +22,17 @@ error NotMaker();
 error OrderInactive();
 error OrderExpired();
 error SelfMatch();
-error NoCross();
+error OrdersNotMatchable();
 error PairMismatch();
 error ZeroSettlementPrice();
 error UnsupportedTokenBehavior();
-error PageLimitTooLarge();
 
-interface IPriceOracle {
-    function getPrice() external view returns (uint256);
-}
-
-contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
-    uint256 private _reentrancyStatus = 1;
+contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, ReentrancyGuard {
     address public owner;
     bool public paused;
     event Paused(address indexed by);
     event Unpaused(address indexed by);
 
-    modifier nonReentrant() {
-        require(_reentrancyStatus == 1, "WindmillExchange: reentrant call");
-        _reentrancyStatus = 2;
-        _;
-        _reentrancyStatus = 1;
-    }
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
         _;
@@ -82,7 +71,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         uint256 indexed sellOrderId,
         address indexed keeper,
         uint256 settlementPrice,
-        uint256 filledAmount
+        uint256 executedQuantity
     );
     event OrderFilled(uint256 indexed orderId);
     event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
@@ -96,7 +85,6 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         address tokenOut,
         uint256 amountIn,
         uint256 startPrice,
-        address priceFeed,
         int256 slope,
         uint256 minPrice,
         uint256 maxPrice,
@@ -107,10 +95,6 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         if (tokenIn == address(0) || tokenOut == address(0)) revert ZeroAddress();
         if (tokenIn == tokenOut) revert SameToken();
         if (amountIn == 0) revert ZeroAmount();
-        if (priceFeed != address(0)) {
-            startPrice = IPriceOracle(priceFeed).getPrice();
-        }
-
         if (startPrice == 0) revert ZeroStartPrice();
         if (expiry != 0 && expiry <= block.timestamp) revert InvalidExpiry();
         if (maxPrice != 0 && maxPrice < minPrice) revert InvalidPriceBounds();
@@ -180,45 +164,43 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         _validateMatch(buy, sell, block.timestamp);
 
         (
-            uint256 settlementPx,
-            uint256 filledAsset,
-            uint256 paymentOwed,
+            uint256 settlementPrice,
+            uint256 executedQuantity,
+            uint256 notionalAmount,
             bool buyFilled,
             bool sellFilled
         ) = _computeSettlement(buy, sell, block.timestamp);
 
-        uint256 newBuyRemaining = buy.remainingIn - paymentOwed;
-        uint256 newSellRemaining = sell.remainingIn - filledAsset;
+        uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
+        uint256 newSellRemaining = sell.remainingIn - executedQuantity;
 
         // Effects
         if (buyFilled) {
             _deactivateOrder(buyOrderId);
             _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
+            emit OrderFilled(buyOrderId);
         } else {
             _updateRemainingIn(buyOrderId, newBuyRemaining);
+            emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
         }
 
         if (sellFilled) {
             _deactivateOrder(sellOrderId);
             _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
+            emit OrderFilled(sellOrderId);
         } else {
             _updateRemainingIn(sellOrderId, newSellRemaining);
+            emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
         }
 
         // Interactions
-        uint256 keeperFee = paymentOwed / 1000; // 0.1%
+        uint256 keeperFee = notionalAmount / 1000; // 0.1%
 
-        TokenTransfer.safeTransfer(sell.tokenIn, buy.maker, filledAsset);
-        TokenTransfer.safeTransfer(buy.tokenIn, sell.maker, paymentOwed - keeperFee);
+        TokenTransfer.safeTransfer(sell.tokenIn, buy.maker, executedQuantity);
+        TokenTransfer.safeTransfer(buy.tokenIn, sell.maker, notionalAmount - keeperFee);
         TokenTransfer.safeTransfer(buy.tokenIn, msg.sender, keeperFee);
 
-        emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPx, filledAsset);
-
-        if (buyFilled) emit OrderFilled(buyOrderId);
-        else emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
-
-        if (sellFilled) emit OrderFilled(sellOrderId);
-        else emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+        emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity);
     }
 
     function currentPrice(uint256 orderId, uint256 timestamp)
@@ -274,36 +256,36 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         if (!buy.isBuy || sell.isBuy) revert PairMismatch();
         if (buy.tokenOut != sell.tokenIn || buy.tokenIn != sell.tokenOut) revert PairMismatch();
         if (buy.maker == sell.maker) revert SelfMatch();
-        if (!PriceCurve.hasCrossed(buy, sell, ts)) revert NoCross();
+        if (!PriceCurve.isMatchable(buy, sell, ts)) revert OrdersNotMatchable();
     }
 
     function _computeSettlement(Order memory buy, Order memory sell, uint256 ts)
         private
         pure
         returns (
-            uint256 settlementPx,
-            uint256 filledAsset,
-            uint256 paymentOwed,
+            uint256 settlementPrice,
+            uint256 executedQuantity,
+            uint256 notionalAmount,
             bool buyFilled,
             bool sellFilled
         )
     {
-        settlementPx = PriceCurve.settlementPrice(buy, sell, ts);
-        if (settlementPx == 0) revert ZeroSettlementPrice();
+        settlementPrice = PriceCurve.settlementPrice(buy, sell, ts);
+        if (settlementPrice == 0) revert ZeroSettlementPrice();
 
-        uint256 maxAssetFromBuy = MathUtils.mulDiv(buy.remainingIn, settlementPx, MathUtils.RAY);
-        filledAsset = maxAssetFromBuy < sell.remainingIn ? maxAssetFromBuy : sell.remainingIn;
+        uint256 buyerAffordableQuantity= MathUtils.mulDiv(buy.remainingIn, settlementPrice, MathUtils.RAY);
+        executedQuantity = buyerAffordableQuantity< sell.remainingIn ? buyerAffordableQuantity: sell.remainingIn;
 
         // Compute payment from asset
-        paymentOwed = MathUtils.mulDiv(filledAsset, MathUtils.RAY, settlementPx);
+        notionalAmount = MathUtils.mulDiv(executedQuantity, MathUtils.RAY, settlementPrice);
 
         // Recompute asset from floored payment to ensure consistency
-        filledAsset = MathUtils.mulDiv(paymentOwed, settlementPx, MathUtils.RAY);
+        executedQuantity = MathUtils.mulDiv(notionalAmount, settlementPrice, MathUtils.RAY);
 
         // If rounding removed the asset amount, the trade is invalid
-        if (filledAsset == 0) revert ZeroAmount();
+        if (executedQuantity == 0) revert ZeroAmount();
 
-        buyFilled = (buy.remainingIn - paymentOwed) == 0;
-        sellFilled = (sell.remainingIn - filledAsset) == 0;
+        buyFilled = (buy.remainingIn - notionalAmount) == 0;
+        sellFilled = (sell.remainingIn - executedQuantity) == 0;
     }
 }

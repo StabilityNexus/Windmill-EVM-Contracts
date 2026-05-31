@@ -9,7 +9,6 @@ interface IWindmillExchange {
         address tokenOut,
         uint256 amountIn,
         uint256 startPrice,
-        address priceFeed,
         int256 slope,
         uint256 minPrice,
         uint256 maxPrice,

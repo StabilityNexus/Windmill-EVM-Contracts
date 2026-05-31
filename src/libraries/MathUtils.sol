@@ -50,6 +50,8 @@ library MathUtils {
         }
     }
 
+    // Overflow-safe midpoint calculation:
+    // equivalent to (a + b) / 2
     function midpoint(uint256 a, uint256 b) internal pure returns (uint256) {
         return (a & b) + ((a ^ b) >> 1);
     }
