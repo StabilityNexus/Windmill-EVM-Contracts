@@ -19,7 +19,13 @@ import {
     OrdersNotMatchable,
     PairMismatch,
     ZeroSettlementPrice,
-    UnsupportedTokenBehavior
+    UnsupportedTokenBehavior,
+    NotOwner,
+    ExchangePaused,
+    InvalidProtocolFee,
+    MismatchedValue,
+    NativeEthNotSupported,
+    EthTransferFailed
 } from "../src/core/WindmillExchange.sol";
 
 contract MockERC20 {
@@ -82,32 +88,68 @@ contract FeeToken {
     }
 }
 
+contract MockWETH is MockERC20 {
+    constructor() MockERC20("Wrapped Ether", "WETH") {}
+
+    fallback() external payable {
+        deposit();
+    }
+
+    receive() external payable {
+        deposit();
+    }
+
+    function deposit() public payable {
+        balanceOf[msg.sender] += msg.value;
+        totalSupply += msg.value;
+        emit Transfer(address(0), msg.sender, msg.value);
+    }
+
+    function withdraw(uint256 amount) public {
+        require(balanceOf[msg.sender] >= amount, "insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+    }
+}
+
 contract WindmillExchangeTest is Test {
     uint256 internal constant RAY = 1e27;
 
     WindmillExchange internal exchange;
     MockERC20 internal tokenA;
     MockERC20 internal tokenB;
+    MockWETH internal weth;
 
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
 
     function setUp() public {
-        exchange = new WindmillExchange();
+        weth = new MockWETH();
+        exchange = new WindmillExchange(address(weth));
         tokenA = new MockERC20("TokenA", "TKNA");
         tokenB = new MockERC20("TokenB", "TKNB");
 
         tokenA.mint(alice, 1_000_000 ether);
         tokenB.mint(bob, 1_000_000 ether);
+        weth.mint(alice, 1_000_000 ether);
+        deal(alice, 1_000_000 ether);
+        deal(bob, 1_000_000 ether);
 
         vm.prank(alice);
         tokenA.approve(address(exchange), type(uint256).max);
         vm.prank(alice);
         tokenB.approve(address(exchange), type(uint256).max);
+        vm.prank(alice);
+        weth.approve(address(exchange), type(uint256).max);
         vm.prank(bob);
         tokenA.approve(address(exchange), type(uint256).max);
         vm.prank(bob);
         tokenB.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        weth.approve(address(exchange), type(uint256).max);
     }
 
     // Helpers
@@ -505,13 +547,13 @@ contract WindmillExchangeTest is Test {
 
     function test_pause_unpause() public {
         vm.prank(bob);
-        vm.expectRevert("Not owner");
+        vm.expectRevert(NotOwner.selector);
         exchange.pause();
 
         exchange.pause();
         assertTrue(exchange.paused());
 
-        vm.expectRevert("Exchange paused");
+        vm.expectRevert(ExchangePaused.selector);
         exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
 
         exchange.unpause();
@@ -581,5 +623,184 @@ contract WindmillExchangeTest is Test {
 
         orders = exchange.getOrdersByPair(address(tokenA), address(tokenB), 5, 10);
         assertEq(orders.length, 0);
+    }
+
+    receive() external payable {}
+
+    // ----------------------------------------------------
+    // New Feature Tests: Batch Matching, Native ETH, Protocol Fees, Access & Pausing
+    // ----------------------------------------------------
+
+    function test_matchOrdersBatch_buyAgainstMultipleSells() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 300 ether, price, 0, 0);
+
+        uint256 sellId1 = _createSellOrder(bob, 100 ether, price, 0, 0);
+        uint256 sellId2 = _createSellOrder(bob, 100 ether, price, 0, 0);
+        uint256 sellId3 = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = sellId1;
+        counterOrderIds[1] = sellId2;
+        counterOrderIds[2] = sellId3;
+
+        uint256 aliceTokenBBefore = tokenB.balanceOf(alice);
+        uint256 bobTokenABefore = tokenA.balanceOf(bob);
+
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(buyId).active);
+        assertFalse(exchange.getOrder(sellId1).active);
+        assertFalse(exchange.getOrder(sellId2).active);
+        assertFalse(exchange.getOrder(sellId3).active);
+
+        assertEq(tokenB.balanceOf(alice) - aliceTokenBBefore, 300 ether);
+        assertEq(tokenA.balanceOf(bob) - bobTokenABefore, 300 ether - 0.3 ether);
+    }
+
+    function test_matchOrdersBatch_sellAgainstMultipleBuys() public {
+        uint256 price = RAY;
+        uint256 sellId = _createSellOrder(bob, 250 ether, price, 0, 0);
+
+        uint256 buyId1 = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256 buyId2 = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256 buyId3 = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = buyId1;
+        counterOrderIds[1] = buyId2;
+        counterOrderIds[2] = buyId3;
+
+        exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(sellId).active);
+        assertFalse(exchange.getOrder(buyId1).active);
+        assertFalse(exchange.getOrder(buyId2).active);
+        assertTrue(exchange.getOrder(buyId3).active);
+        assertEq(exchange.getOrder(buyId3).remainingIn, 50 ether);
+    }
+
+    function test_nativeETH_wrapOnDeposit() public {
+        uint256 startBal = alice.balance;
+        vm.prank(alice);
+        uint256 id = exchange.createOrder{value: 100 ether}(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        assertEq(alice.balance, startBal - 100 ether);
+        assertEq(weth.balanceOf(address(exchange)), 100 ether);
+        Order memory o = exchange.getOrder(id);
+        assertEq(o.tokenIn, address(weth));
+        assertEq(o.remainingIn, 100 ether);
+    }
+
+    function test_nativeETH_unwrapOnCancel() public {
+        vm.prank(alice);
+        uint256 id = exchange.createOrder{value: 100 ether}(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        uint256 balBefore = alice.balance;
+        vm.prank(alice);
+        exchange.cancelOrder(id);
+
+        assertEq(alice.balance, balBefore + 100 ether);
+        assertEq(weth.balanceOf(address(exchange)), 0);
+    }
+
+    function test_nativeETH_unwrapOnSettlement() public {
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder{value: 100 ether}(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB), address(weth), 100 ether, RAY, 0, 0, 0, 0, false
+        );
+
+        uint256 aliceBBefore = tokenB.balanceOf(alice);
+        uint256 bobETHBefore = bob.balance;
+        uint256 keeperETHBefore = address(this).balance;
+
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertEq(tokenB.balanceOf(alice) - aliceBBefore, 100 ether);
+        assertEq(bob.balance - bobETHBefore, 99.9 ether);
+        assertEq(address(this).balance - keeperETHBefore, 0.1 ether);
+    }
+
+    function test_nativeETH_revertOnNonWethValue() public {
+        vm.prank(alice);
+        vm.expectRevert(NativeEthNotSupported.selector);
+        exchange.createOrder{value: 10 ether}(
+            address(tokenA), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
+        );
+    }
+
+    function test_nativeETH_revertOnMismatchedValue() public {
+        vm.prank(alice);
+        vm.expectRevert(MismatchedValue.selector);
+        exchange.createOrder{value: 5 ether}(
+            address(weth), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
+        );
+    }
+
+    function test_protocolFees_setFeeAndRespectCap() public {
+        vm.prank(bob);
+        vm.expectRevert(NotOwner.selector);
+        exchange.setProtocolFee(bob, 100);
+
+        vm.expectRevert(InvalidProtocolFee.selector);
+        exchange.setProtocolFee(bob, 501);
+
+        vm.expectRevert(ZeroAddress.selector);
+        exchange.setProtocolFee(address(0), 100);
+
+        exchange.setProtocolFee(bob, 200);
+        assertEq(exchange.treasury(), bob);
+        assertEq(exchange.protocolFeeBps(), 200);
+    }
+
+    function test_protocolFees_collectionOnSettlement() public {
+        address treasuryAddr = makeAddr("treasury");
+        exchange.setProtocolFee(treasuryAddr, 200);
+
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+        uint256 sellId = _createSellOrder(bob, 100 ether, RAY, 0, 0);
+
+        uint256 treasuryBefore = tokenA.balanceOf(treasuryAddr);
+        uint256 bobSellerBefore = tokenA.balanceOf(bob);
+
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertEq(tokenA.balanceOf(bob) - bobSellerBefore, 97.9 ether);
+        assertEq(tokenA.balanceOf(treasuryAddr) - treasuryBefore, 2 ether);
+    }
+
+    function test_cancelOrder_allowedDuringPause() public {
+        uint256 id = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        exchange.pause();
+        assertTrue(exchange.paused());
+
+        uint256 balBefore = tokenA.balanceOf(alice);
+        vm.prank(alice);
+        exchange.cancelOrder(id);
+
+        assertEq(tokenA.balanceOf(alice), balBefore + 100 ether);
+        assertFalse(exchange.getOrder(id).active);
+    }
+
+    function test_transferOwnership() public {
+        vm.prank(bob);
+        vm.expectRevert(NotOwner.selector);
+        exchange.transferOwnership(bob);
+
+        vm.expectRevert(ZeroAddress.selector);
+        exchange.transferOwnership(address(0));
+
+        exchange.transferOwnership(bob);
+        assertEq(exchange.owner(), bob);
     }
 }

@@ -27,25 +27,45 @@ error PairMismatch();
 error ZeroSettlementPrice();
 error UnsupportedTokenBehavior();
 
+error NotOwner();
+error ExchangePaused();
+error InvalidProtocolFee();
+error MismatchedValue();
+error NativeEthNotSupported();
+error EthTransferFailed();
+
+interface IWETH {
+    function deposit() external payable;
+    function withdraw(uint256) external;
+}
+
 contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, ReentrancyGuard {
     address public owner;
     bool public paused;
+    address public immutable WETH;
+    address public treasury;
+    uint256 public protocolFeeBps;
+
     event Paused(address indexed by);
     event Unpaused(address indexed by);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
 
     modifier whenNotPaused() {
-        require(!paused, "Exchange paused");
+        if (paused) revert ExchangePaused();
         _;
     }
 
-    constructor() {
+    constructor(address _weth) {
+        if (_weth == address(0)) revert ZeroAddress();
         owner = msg.sender;
+        WETH = _weth;
     }
+
+    receive() external payable {}
 
     function pause() external onlyOwner {
         paused = true;
@@ -55,6 +75,31 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
     function unpause() external onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
+    }
+
+    function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external override onlyOwner {
+        if (_protocolFeeBps > 500) revert InvalidProtocolFee();
+        if (_protocolFeeBps > 0 && _treasury == address(0)) revert ZeroAddress();
+        treasury = _treasury;
+        protocolFeeBps = _protocolFeeBps;
+        emit ProtocolFeeUpdated(_treasury, _protocolFeeBps);
+    }
+
+    function transferOwnership(address newOwner) external override onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        address oldOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+
+    function _safeTransferTokenOrETH(address token, address to, uint256 amount) internal {
+        if (token == WETH) {
+            IWETH(WETH).withdraw(amount);
+            (bool success, ) = to.call{value: amount}("");
+            if (!success) revert EthTransferFailed();
+        } else {
+            TokenTransfer.safeTransfer(token, to, amount);
+        }
     }
 
     event OrderCreated(
@@ -122,16 +167,22 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         _addOrderToPair(tokenIn, tokenOut, orderId);
 
         // Interactions
-        uint256 balBefore = IERC20(tokenIn).balanceOf(address(this));
-        TokenTransfer.safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
-        if (IERC20(tokenIn).balanceOf(address(this)) - balBefore != amountIn) {
-            revert UnsupportedTokenBehavior();
+        if (tokenIn == WETH && msg.value > 0) {
+            if (msg.value != amountIn) revert MismatchedValue();
+            IWETH(WETH).deposit{value: msg.value}();
+        } else {
+            if (msg.value > 0) revert NativeEthNotSupported();
+            uint256 balBefore = IERC20(tokenIn).balanceOf(address(this));
+            TokenTransfer.safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
+            if (IERC20(tokenIn).balanceOf(address(this)) - balBefore != amountIn) {
+                revert UnsupportedTokenBehavior();
+            }
         }
 
         emit OrderCreated(orderId, msg.sender, tokenIn, tokenOut, amountIn, isBuy);
     }
 
-    function cancelOrder(uint256 orderId) external override nonReentrant whenNotPaused {
+    function cancelOrder(uint256 orderId) external override nonReentrant {
         Order storage order = _getOrder(orderId);
 
         if (order.maker != msg.sender) revert NotMaker();
@@ -146,7 +197,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         _removeOrderFromPair(tokenIn, tokenOut, orderId);
 
         // Interaction
-        TokenTransfer.safeTransfer(tokenIn, msg.sender, refund);
+        _safeTransferTokenOrETH(tokenIn, msg.sender, refund);
 
         emit OrderCancelled(orderId, msg.sender, refund);
     }
@@ -195,12 +246,95 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
 
         // Interactions
         uint256 keeperFee = notionalAmount / 1000; // 0.1%
+        uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
 
-        TokenTransfer.safeTransfer(sell.tokenIn, buy.maker, executedQuantity);
-        TokenTransfer.safeTransfer(buy.tokenIn, sell.maker, notionalAmount - keeperFee);
-        TokenTransfer.safeTransfer(buy.tokenIn, msg.sender, keeperFee);
+        _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
+        _safeTransferTokenOrETH(buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee);
+        _safeTransferTokenOrETH(buy.tokenIn, msg.sender, keeperFee);
+        if (protocolFee > 0 && treasury != address(0)) {
+            _safeTransferTokenOrETH(buy.tokenIn, treasury, protocolFee);
+        }
 
         emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity);
+    }
+
+    function matchOrdersBatch(
+        uint256 orderId,
+        uint256[] calldata counterOrderIds,
+        uint256 deadline
+    ) external override nonReentrant whenNotPaused {
+        require(block.timestamp <= deadline, "Keeper deadline expired");
+        uint256 len = counterOrderIds.length;
+        require(len > 0, "Empty counter orders");
+
+        for (uint256 i = 0; i < len; i++) {
+            uint256 counterOrderId = counterOrderIds[i];
+
+            Order memory order = _getOrderMem(orderId);
+            Order memory counterOrder = _getOrderMem(counterOrderId);
+
+            uint256 buyOrderId;
+            uint256 sellOrderId;
+            Order memory buy;
+            Order memory sell;
+
+            if (order.isBuy) {
+                buyOrderId = orderId;
+                sellOrderId = counterOrderId;
+                buy = order;
+                sell = counterOrder;
+            } else {
+                buyOrderId = counterOrderId;
+                sellOrderId = orderId;
+                buy = counterOrder;
+                sell = order;
+            }
+
+            _validateMatch(buy, sell, block.timestamp);
+
+            (
+                uint256 settlementPrice,
+                uint256 executedQuantity,
+                uint256 notionalAmount,
+                bool buyFilled,
+                bool sellFilled
+            ) = _computeSettlement(buy, sell, block.timestamp);
+
+            uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
+            uint256 newSellRemaining = sell.remainingIn - executedQuantity;
+
+            // Effects
+            if (buyFilled) {
+                _deactivateOrder(buyOrderId);
+                _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
+                emit OrderFilled(buyOrderId);
+            } else {
+                _updateRemainingIn(buyOrderId, newBuyRemaining);
+                emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
+            }
+
+            if (sellFilled) {
+                _deactivateOrder(sellOrderId);
+                _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
+                emit OrderFilled(sellOrderId);
+            } else {
+                _updateRemainingIn(sellOrderId, newSellRemaining);
+                emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+            }
+
+            // Interactions
+            uint256 keeperFee = notionalAmount / 1000; // 0.1%
+            uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
+
+            _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
+            _safeTransferTokenOrETH(buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee);
+            _safeTransferTokenOrETH(buy.tokenIn, msg.sender, keeperFee);
+            if (protocolFee > 0 && treasury != address(0)) {
+                _safeTransferTokenOrETH(buy.tokenIn, treasury, protocolFee);
+            }
+
+            emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity);
+        }
     }
 
     function currentPrice(uint256 orderId, uint256 timestamp)

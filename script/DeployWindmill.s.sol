@@ -9,7 +9,8 @@ contract DeployWindmill is Script {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerKey);
 
-        exchange = new WindmillExchange();
+        address wethAddress = vm.envOr("WETH_ADDRESS", address(0xC02aaA39b223FE8D0A0e5C4F27ead9083C756Cc2));
+        exchange = new WindmillExchange(wethAddress);
 
         vm.stopBroadcast();
 
