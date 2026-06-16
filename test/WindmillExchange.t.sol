@@ -3,7 +3,8 @@ pragma solidity ^0.8.23;
 
 import { Test } from "forge-std/Test.sol";
 import { WindmillExchange } from "../src/core/WindmillExchange.sol";
-import { Order } from "../src/types/OrderTypes.sol";
+import { Order, OrderType } from "../src/types/OrderTypes.sol";
+import { MockPriceOracle } from "./mocks/MockPriceOracle.sol";
 import {
     ZeroAddress,
     SameToken,
@@ -25,7 +26,9 @@ import {
     InvalidProtocolFee,
     MismatchedValue,
     NativeEthNotSupported,
-    EthTransferFailed
+    EthTransferFailed,
+    OracleNotSet,
+    TriggerConditionNotMet
 } from "../src/core/WindmillExchange.sol";
 
 contract MockERC20 {
@@ -802,5 +805,131 @@ contract WindmillExchangeTest is Test {
 
         exchange.transferOwnership(bob);
         assertEq(exchange.owner(), bob);
+    }
+
+    function test_setPriceOracle_success() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+        assertEq(exchange.priceOracle(), address(oracle));
+    }
+
+    function test_setPriceOracle_revert_notOwner() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        vm.prank(alice);
+        vm.expectRevert(NotOwner.selector);
+        exchange.setPriceOracle(address(oracle));
+    }
+
+    function test_conditionalOrder_revert_oracleNotSet() public {
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder(
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            true,
+            OrderType.STOP_LOSS,
+            RAY
+        );
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false
+        );
+
+        vm.expectRevert(OracleNotSet.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+    }
+
+    function test_stopLoss_sell_trigger() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.STOP_LOSS,
+            RAY * 8 / 10
+        );
+
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 9 / 10);
+        vm.expectRevert(abi.encodeWithSelector(TriggerConditionNotMet.selector, sellId));
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 8 / 10);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(sellId).active);
+    }
+
+    function test_takeProfit_sell_trigger() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.TAKE_PROFIT,
+            RAY
+        );
+
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 9 / 10);
+        vm.expectRevert(abi.encodeWithSelector(TriggerConditionNotMet.selector, sellId));
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(sellId).active);
+    }
+
+    function test_conditionalOrder_creation_revert_zeroTriggerPrice() public {
+        vm.prank(alice);
+        vm.expectRevert(InvalidPriceBounds.selector);
+        exchange.createOrder(
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.STOP_LOSS,
+            0
+        );
     }
 }
