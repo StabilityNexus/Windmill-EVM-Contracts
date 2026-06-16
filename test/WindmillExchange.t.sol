@@ -89,7 +89,7 @@ contract FeeToken {
 }
 
 contract MockWETH is MockERC20 {
-    constructor() MockERC20("Wrapped Ether", "WETH") {}
+    constructor() MockERC20("Wrapped Ether", "WETH") { }
 
     fallback() external payable {
         deposit();
@@ -110,7 +110,7 @@ contract MockWETH is MockERC20 {
         balanceOf[msg.sender] -= amount;
         totalSupply -= amount;
         emit Transfer(msg.sender, address(0), amount);
-        (bool success, ) = msg.sender.call{value: amount}("");
+        (bool success,) = msg.sender.call{ value: amount }("");
         require(success, "ETH transfer failed");
     }
 }
@@ -625,7 +625,7 @@ contract WindmillExchangeTest is Test {
         assertEq(orders.length, 0);
     }
 
-    receive() external payable {}
+    receive() external payable { }
 
     // ----------------------------------------------------
     // New Feature Tests: Batch Matching, Native ETH, Protocol Fees, Access & Pausing
@@ -683,7 +683,7 @@ contract WindmillExchangeTest is Test {
     function test_nativeETH_wrapOnDeposit() public {
         uint256 startBal = alice.balance;
         vm.prank(alice);
-        uint256 id = exchange.createOrder{value: 100 ether}(
+        uint256 id = exchange.createOrder{ value: 100 ether }(
             address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
         );
 
@@ -696,7 +696,7 @@ contract WindmillExchangeTest is Test {
 
     function test_nativeETH_unwrapOnCancel() public {
         vm.prank(alice);
-        uint256 id = exchange.createOrder{value: 100 ether}(
+        uint256 id = exchange.createOrder{ value: 100 ether }(
             address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
         );
 
@@ -710,7 +710,7 @@ contract WindmillExchangeTest is Test {
 
     function test_nativeETH_unwrapOnSettlement() public {
         vm.prank(alice);
-        uint256 buyId = exchange.createOrder{value: 100 ether}(
+        uint256 buyId = exchange.createOrder{ value: 100 ether }(
             address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
         );
 
@@ -733,7 +733,7 @@ contract WindmillExchangeTest is Test {
     function test_nativeETH_revertOnNonWethValue() public {
         vm.prank(alice);
         vm.expectRevert(NativeEthNotSupported.selector);
-        exchange.createOrder{value: 10 ether}(
+        exchange.createOrder{ value: 10 ether }(
             address(tokenA), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
         );
     }
@@ -741,7 +741,7 @@ contract WindmillExchangeTest is Test {
     function test_nativeETH_revertOnMismatchedValue() public {
         vm.prank(alice);
         vm.expectRevert(MismatchedValue.selector);
-        exchange.createOrder{value: 5 ether}(
+        exchange.createOrder{ value: 5 ether }(
             address(weth), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
         );
     }

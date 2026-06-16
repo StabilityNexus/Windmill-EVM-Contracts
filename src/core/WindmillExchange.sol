@@ -65,7 +65,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         WETH = _weth;
     }
 
-    receive() external payable {}
+    receive() external payable { }
 
     function pause() external onlyOwner {
         paused = true;
@@ -77,7 +77,11 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         emit Unpaused(msg.sender);
     }
 
-    function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external override onlyOwner {
+    function setProtocolFee(address _treasury, uint256 _protocolFeeBps)
+        external
+        override
+        onlyOwner
+    {
         if (_protocolFeeBps > 500) revert InvalidProtocolFee();
         if (_protocolFeeBps > 0 && _treasury == address(0)) revert ZeroAddress();
         treasury = _treasury;
@@ -95,7 +99,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
     function _safeTransferTokenOrETH(address token, address to, uint256 amount) internal {
         if (token == WETH) {
             IWETH(WETH).withdraw(amount);
-            (bool success, ) = to.call{value: amount}("");
+            (bool success,) = to.call{ value: amount }("");
             if (!success) revert EthTransferFailed();
         } else {
             TokenTransfer.safeTransfer(token, to, amount);
@@ -135,7 +139,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         uint256 maxPrice,
         uint256 expiry,
         bool isBuy
-    ) external override nonReentrant whenNotPaused returns (uint256 orderId) {
+    ) external payable override nonReentrant whenNotPaused returns (uint256 orderId) {
         // Checks
         if (tokenIn == address(0) || tokenOut == address(0)) revert ZeroAddress();
         if (tokenIn == tokenOut) revert SameToken();
@@ -169,7 +173,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         // Interactions
         if (tokenIn == WETH && msg.value > 0) {
             if (msg.value != amountIn) revert MismatchedValue();
-            IWETH(WETH).deposit{value: msg.value}();
+            IWETH(WETH).deposit{ value: msg.value }();
         } else {
             if (msg.value > 0) revert NativeEthNotSupported();
             uint256 balBefore = IERC20(tokenIn).balanceOf(address(this));
@@ -258,11 +262,12 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity);
     }
 
-    function matchOrdersBatch(
-        uint256 orderId,
-        uint256[] calldata counterOrderIds,
-        uint256 deadline
-    ) external override nonReentrant whenNotPaused {
+    function matchOrdersBatch(uint256 orderId, uint256[] calldata counterOrderIds, uint256 deadline)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+    {
         require(block.timestamp <= deadline, "Keeper deadline expired");
         uint256 len = counterOrderIds.length;
         require(len > 0, "Empty counter orders");
@@ -327,13 +332,17 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
 
             _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
-            _safeTransferTokenOrETH(buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee);
+            _safeTransferTokenOrETH(
+                buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee
+            );
             _safeTransferTokenOrETH(buy.tokenIn, msg.sender, keeperFee);
             if (protocolFee > 0 && treasury != address(0)) {
                 _safeTransferTokenOrETH(buy.tokenIn, treasury, protocolFee);
             }
 
-            emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity);
+            emit OrderMatched(
+                buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity
+            );
         }
     }
 
