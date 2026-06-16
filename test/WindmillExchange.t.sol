@@ -3,7 +3,8 @@ pragma solidity ^0.8.23;
 
 import { Test } from "forge-std/Test.sol";
 import { WindmillExchange } from "../src/core/WindmillExchange.sol";
-import { Order } from "../src/types/OrderTypes.sol";
+import { Order, OrderType } from "../src/types/OrderTypes.sol";
+import { MockPriceOracle } from "./mocks/MockPriceOracle.sol";
 import {
     ZeroAddress,
     SameToken,
@@ -25,7 +26,9 @@ import {
     InvalidProtocolFee,
     MismatchedValue,
     NativeEthNotSupported,
-    EthTransferFailed
+    EthTransferFailed,
+    OracleNotSet,
+    TriggerConditionNotMet
 } from "../src/core/WindmillExchange.sol";
 
 contract MockERC20 {
@@ -802,5 +805,196 @@ contract WindmillExchangeTest is Test {
 
         exchange.transferOwnership(bob);
         assertEq(exchange.owner(), bob);
+    }
+
+    function test_setPriceOracle_success() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+        assertEq(exchange.priceOracle(), address(oracle));
+    }
+
+    function test_setPriceOracle_revert_notOwner() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        vm.prank(alice);
+        vm.expectRevert(NotOwner.selector);
+        exchange.setPriceOracle(address(oracle));
+    }
+
+    function test_conditionalOrder_revert_oracleNotSet() public {
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder(
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            true,
+            OrderType.STOP_LOSS,
+            RAY
+        );
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false
+        );
+
+        vm.expectRevert(OracleNotSet.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+    }
+
+    function test_stopLoss_sell_trigger() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.STOP_LOSS,
+            RAY * 8 / 10
+        );
+
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 9 / 10);
+        vm.expectRevert(abi.encodeWithSelector(TriggerConditionNotMet.selector, sellId));
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 8 / 10);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(sellId).active);
+    }
+
+    function test_takeProfit_sell_trigger() public {
+        MockPriceOracle oracle = new MockPriceOracle();
+        exchange.setPriceOracle(address(oracle));
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.TAKE_PROFIT,
+            RAY
+        );
+
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY * 9 / 10);
+        vm.expectRevert(abi.encodeWithSelector(TriggerConditionNotMet.selector, sellId));
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        oracle.setPrice(address(tokenB), address(tokenA), RAY);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(sellId).active);
+    }
+
+    function test_conditionalOrder_creation_revert_zeroTriggerPrice() public {
+        vm.prank(alice);
+        vm.expectRevert(InvalidPriceBounds.selector);
+        exchange.createOrder(
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false,
+            OrderType.STOP_LOSS,
+            0
+        );
+    }
+
+    function test_matchOrdersBatch_gasOptimized() public {
+        // Alice creates a large buy order for 100 ether of tokenB with tokenA
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
+
+        // Bob creates three separate sell orders for 30, 40, and 30 ether of tokenB for tokenA
+        uint256 sellId1 = _createSellOrder(bob, 30 ether, RAY, 0, 0);
+        uint256 sellId2 = _createSellOrder(bob, 40 ether, RAY, 0, 0);
+        uint256 sellId3 = _createSellOrder(bob, 50 ether, RAY, 0, 0); // Bob has extra remaining
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = sellId1;
+        counterOrderIds[1] = sellId2;
+        counterOrderIds[2] = sellId3;
+
+        // Execute batch match against counter-orders
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        // Verify primary order is fully filled and deactivated
+        assertFalse(exchange.getOrder(buyId).active);
+        // Verify counter orders 1 and 2 are fully filled
+        assertFalse(exchange.getOrder(sellId1).active);
+        assertFalse(exchange.getOrder(sellId2).active);
+        // Verify counter order 3 is partially filled (remains active with 20 ether remaining)
+        assertTrue(exchange.getOrder(sellId3).active);
+        assertEq(exchange.getOrder(sellId3).remainingIn, 20 ether);
+    }
+
+    function test_payout_revert_EthTransferFailed() public {
+        RejectETH rejector = new RejectETH();
+        tokenA.mint(address(rejector), 100 ether);
+
+        rejector.createBuyOrder(exchange, address(tokenA), address(weth), 100 ether);
+        uint256 buyId = exchange.totalOrders();
+
+        weth.mint(alice, 100 ether);
+        deal(address(weth), 100 ether); // Fund WETH with native ETH for withdraw
+        vm.prank(alice);
+        uint256 sellId = exchange.createOrder(
+            address(weth),
+            address(tokenA),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            false
+        );
+
+        vm.expectRevert(EthTransferFailed.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+    }
+}
+
+contract RejectETH {
+    function createBuyOrder(
+        WindmillExchange exchange,
+        address tokenA,
+        address weth,
+        uint256 amount
+    ) external {
+        MockERC20(tokenA).approve(address(exchange), type(uint256).max);
+        exchange.createOrder(tokenA, weth, amount, 1e27, 0, 0, 0, 0, true);
     }
 }

@@ -2,13 +2,14 @@
 pragma solidity ^0.8.23;
 
 import { IERC20 } from "../interfaces/IERC20.sol";
-import { Order } from "../types/OrderTypes.sol";
+import { Order, OrderType } from "../types/OrderTypes.sol";
 import { OrderStorage } from "../storage/OrderStorage.sol";
 import { PairStorage } from "../storage/PairStorage.sol";
 import { PriceCurve } from "../libraries/PriceCurve.sol";
 import { TokenTransfer } from "../libraries/TokenTransfer.sol";
 import { MathUtils } from "../libraries/MathUtils.sol";
 import { IWindmillExchange } from "../interfaces/IWindmillExchange.sol";
+import { IPriceOracle } from "../interfaces/IPriceOracle.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 error ZeroAddress();
@@ -34,6 +35,9 @@ error MismatchedValue();
 error NativeEthNotSupported();
 error EthTransferFailed();
 
+error OracleNotSet();
+error TriggerConditionNotMet(uint256 orderId);
+
 interface IWETH {
     function deposit() external payable;
     function withdraw(uint256) external;
@@ -45,6 +49,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
     address public immutable WETH;
     address public treasury;
     uint256 public protocolFeeBps;
+    address public override priceOracle;
 
     event Paused(address indexed by);
     event Unpaused(address indexed by);
@@ -96,6 +101,11 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         emit OwnershipTransferred(oldOwner, newOwner);
     }
 
+    function setPriceOracle(address _oracle) external override onlyOwner {
+        priceOracle = _oracle;
+        emit PriceOracleUpdated(_oracle);
+    }
+
     function _safeTransferTokenOrETH(address token, address to, uint256 amount) internal {
         if (token == WETH) {
             IWETH(WETH).withdraw(amount);
@@ -138,8 +148,10 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         uint256 minPrice,
         uint256 maxPrice,
         uint256 expiry,
-        bool isBuy
-    ) external payable override nonReentrant whenNotPaused returns (uint256 orderId) {
+        bool isBuy,
+        OrderType orderType,
+        uint256 triggerPrice
+    ) public payable override nonReentrant whenNotPaused returns (uint256 orderId) {
         // Checks
         if (tokenIn == address(0) || tokenOut == address(0)) revert ZeroAddress();
         if (tokenIn == tokenOut) revert SameToken();
@@ -148,6 +160,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         if (expiry != 0 && expiry <= block.timestamp) revert InvalidExpiry();
         if (maxPrice != 0 && maxPrice < minPrice) revert InvalidPriceBounds();
         if (slope != 0 && MathUtils.abs(slope) > SLOPE_ABS_LIMIT) revert SlopeOverflow();
+        if (orderType != OrderType.LIMIT && triggerPrice == 0) revert InvalidPriceBounds();
 
         // Effects — store and register BEFORE the external transfer (CEI)
         Order memory order = Order({
@@ -164,7 +177,9 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             minPrice: minPrice,
             maxPrice: maxPrice,
             createdAt: block.timestamp,
-            expiry: expiry
+            expiry: expiry,
+            orderType: orderType,
+            triggerPrice: triggerPrice
         });
 
         orderId = _storeOrder(order);
@@ -184,6 +199,32 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         }
 
         emit OrderCreated(orderId, msg.sender, tokenIn, tokenOut, amountIn, isBuy);
+    }
+
+    function createOrder(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 startPrice,
+        int256 slope,
+        uint256 minPrice,
+        uint256 maxPrice,
+        uint256 expiry,
+        bool isBuy
+    ) external payable override returns (uint256 orderId) {
+        return createOrder(
+            tokenIn,
+            tokenOut,
+            amountIn,
+            startPrice,
+            slope,
+            minPrice,
+            maxPrice,
+            expiry,
+            isBuy,
+            OrderType.LIMIT,
+            0
+        );
     }
 
     function cancelOrder(uint256 orderId) external override nonReentrant {
@@ -272,76 +313,117 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         uint256 len = counterOrderIds.length;
         require(len > 0, "Empty counter orders");
 
+        Order memory primaryOrder = _getOrderMem(orderId);
+        if (!primaryOrder.active) revert OrderInactive();
+
+        uint256 startRemainingIn = primaryOrder.remainingIn;
+
         for (uint256 i = 0; i < len; i++) {
-            uint256 counterOrderId = counterOrderIds[i];
-
-            Order memory order = _getOrderMem(orderId);
-            Order memory counterOrder = _getOrderMem(counterOrderId);
-
-            uint256 buyOrderId;
-            uint256 sellOrderId;
-            Order memory buy;
-            Order memory sell;
-
-            if (order.isBuy) {
-                buyOrderId = orderId;
-                sellOrderId = counterOrderId;
-                buy = order;
-                sell = counterOrder;
-            } else {
-                buyOrderId = counterOrderId;
-                sellOrderId = orderId;
-                buy = counterOrder;
-                sell = order;
+            if (!primaryOrder.active) {
+                break;
             }
 
-            _validateMatch(buy, sell, block.timestamp);
-
             (
-                uint256 settlementPrice,
+                ,
                 uint256 executedQuantity,
                 uint256 notionalAmount,
                 bool buyFilled,
                 bool sellFilled
-            ) = _computeSettlement(buy, sell, block.timestamp);
+            ) = _matchStep(primaryOrder, counterOrderIds[i], orderId);
 
-            uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
-            uint256 newSellRemaining = sell.remainingIn - executedQuantity;
-
-            // Effects
-            if (buyFilled) {
-                _deactivateOrder(buyOrderId);
-                _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
-                emit OrderFilled(buyOrderId);
+            if (primaryOrder.isBuy) {
+                primaryOrder.remainingIn -= notionalAmount;
+                primaryOrder.active = !buyFilled;
             } else {
-                _updateRemainingIn(buyOrderId, newBuyRemaining);
-                emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
+                primaryOrder.remainingIn -= executedQuantity;
+                primaryOrder.active = !sellFilled;
             }
+        }
+
+        if (primaryOrder.remainingIn != startRemainingIn) {
+            if (!primaryOrder.active) {
+                _deactivateOrder(orderId);
+                _removeOrderFromPair(primaryOrder.tokenIn, primaryOrder.tokenOut, orderId);
+                emit OrderFilled(orderId);
+            } else {
+                _updateRemainingIn(orderId, primaryOrder.remainingIn);
+                emit OrderPartiallyFilled(orderId, primaryOrder.remainingIn);
+            }
+        }
+    }
+
+    function _matchStep(
+        Order memory primaryOrder,
+        uint256 counterOrderId,
+        uint256 orderId
+    ) private returns (
+        uint256 settlementPrice,
+        uint256 executedQuantity,
+        uint256 notionalAmount,
+        bool buyFilled,
+        bool sellFilled
+    ) {
+        Order memory counterOrder = _getOrderMem(counterOrderId);
+
+        if (primaryOrder.isBuy) {
+            _validateMatch(primaryOrder, counterOrder, block.timestamp);
+            (settlementPrice, executedQuantity, notionalAmount, buyFilled, sellFilled) =
+                _computeSettlement(primaryOrder, counterOrder, block.timestamp);
 
             if (sellFilled) {
-                _deactivateOrder(sellOrderId);
-                _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
-                emit OrderFilled(sellOrderId);
+                _deactivateOrder(counterOrderId);
+                _removeOrderFromPair(counterOrder.tokenIn, counterOrder.tokenOut, counterOrderId);
+                emit OrderFilled(counterOrderId);
             } else {
-                _updateRemainingIn(sellOrderId, newSellRemaining);
-                emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+                uint256 rem = counterOrder.remainingIn - executedQuantity;
+                _updateRemainingIn(counterOrderId, rem);
+                emit OrderPartiallyFilled(counterOrderId, rem);
             }
 
-            // Interactions
-            uint256 keeperFee = notionalAmount / 1000; // 0.1%
+            uint256 keeperFee = notionalAmount / 1000;
             uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
 
-            _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
+            _safeTransferTokenOrETH(counterOrder.tokenIn, primaryOrder.maker, executedQuantity);
             _safeTransferTokenOrETH(
-                buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee
+                primaryOrder.tokenIn, counterOrder.maker, notionalAmount - keeperFee - protocolFee
             );
-            _safeTransferTokenOrETH(buy.tokenIn, msg.sender, keeperFee);
+            _safeTransferTokenOrETH(primaryOrder.tokenIn, msg.sender, keeperFee);
             if (protocolFee > 0 && treasury != address(0)) {
-                _safeTransferTokenOrETH(buy.tokenIn, treasury, protocolFee);
+                _safeTransferTokenOrETH(primaryOrder.tokenIn, treasury, protocolFee);
             }
 
             emit OrderMatched(
-                buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity
+                orderId, counterOrderId, msg.sender, settlementPrice, executedQuantity
+            );
+        } else {
+            _validateMatch(counterOrder, primaryOrder, block.timestamp);
+            (settlementPrice, executedQuantity, notionalAmount, buyFilled, sellFilled) =
+                _computeSettlement(counterOrder, primaryOrder, block.timestamp);
+
+            if (buyFilled) {
+                _deactivateOrder(counterOrderId);
+                _removeOrderFromPair(counterOrder.tokenIn, counterOrder.tokenOut, counterOrderId);
+                emit OrderFilled(counterOrderId);
+            } else {
+                uint256 rem = counterOrder.remainingIn - notionalAmount;
+                _updateRemainingIn(counterOrderId, rem);
+                emit OrderPartiallyFilled(counterOrderId, rem);
+            }
+
+            uint256 keeperFee = notionalAmount / 1000;
+            uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
+
+            _safeTransferTokenOrETH(primaryOrder.tokenIn, counterOrder.maker, executedQuantity);
+            _safeTransferTokenOrETH(
+                counterOrder.tokenIn, primaryOrder.maker, notionalAmount - keeperFee - protocolFee
+            );
+            _safeTransferTokenOrETH(counterOrder.tokenIn, msg.sender, keeperFee);
+            if (protocolFee > 0 && treasury != address(0)) {
+                _safeTransferTokenOrETH(counterOrder.tokenIn, treasury, protocolFee);
+            }
+
+            emit OrderMatched(
+                counterOrderId, orderId, msg.sender, settlementPrice, executedQuantity
             );
         }
     }
@@ -391,7 +473,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         return _totalOrders();
     }
 
-    function _validateMatch(Order memory buy, Order memory sell, uint256 ts) private pure {
+    function _validateMatch(Order memory buy, Order memory sell, uint256 ts) private view {
         if (!buy.active) revert OrderInactive();
         if (!sell.active) revert OrderInactive();
         if (buy.expiry != 0 && ts > buy.expiry) revert OrderExpired();
@@ -399,7 +481,25 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         if (!buy.isBuy || sell.isBuy) revert PairMismatch();
         if (buy.tokenOut != sell.tokenIn || buy.tokenIn != sell.tokenOut) revert PairMismatch();
         if (buy.maker == sell.maker) revert SelfMatch();
+        _checkConditionalTrigger(buy);
+        _checkConditionalTrigger(sell);
         if (!PriceCurve.isMatchable(buy, sell, ts)) revert OrdersNotMatchable();
+    }
+
+    function _checkConditionalTrigger(Order memory order) private view {
+        if (order.orderType == OrderType.LIMIT) {
+            return;
+        }
+
+        if (priceOracle == address(0)) revert OracleNotSet();
+
+        uint256 marketPrice = IPriceOracle(priceOracle).getPrice(order.tokenIn, order.tokenOut);
+
+        if (order.orderType == OrderType.STOP_LOSS) {
+            if (marketPrice > order.triggerPrice) revert TriggerConditionNotMet(order.id);
+        } else if (order.orderType == OrderType.TAKE_PROFIT) {
+            if (marketPrice < order.triggerPrice) revert TriggerConditionNotMet(order.id);
+        }
     }
 
     function _computeSettlement(Order memory buy, Order memory sell, uint256 ts)
