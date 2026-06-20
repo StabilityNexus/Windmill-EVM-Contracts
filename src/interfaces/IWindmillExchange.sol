@@ -4,6 +4,9 @@ pragma solidity ^0.8.23;
 import { Order } from "../types/OrderTypes.sol";
 
 interface IWindmillExchange {
+    event ProtocolFeeUpdated(address indexed treasury, uint256 protocolFeeBps);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     function createOrder(
         address tokenIn,
         address tokenOut,
@@ -14,11 +17,18 @@ interface IWindmillExchange {
         uint256 maxPrice,
         uint256 expiry,
         bool isBuy
-    ) external returns (uint256 orderId);
+    ) external payable returns (uint256 orderId);
 
     function cancelOrder(uint256 orderId) external;
 
     function matchOrders(uint256 buyOrderId, uint256 sellOrderId, uint256 deadline) external;
+
+    function matchOrdersBatch(uint256 orderId, uint256[] calldata counterOrderIds, uint256 deadline)
+        external;
+
+    function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external;
+
+    function transferOwnership(address newOwner) external;
 
     function currentPrice(uint256 orderId, uint256 timestamp) external view returns (uint256 price);
 
