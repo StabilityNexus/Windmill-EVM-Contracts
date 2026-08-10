@@ -3,7 +3,7 @@
 
 <!-- Organization Logo -->
 <div align="center" style="display: flex; align-items: center; justify-content: center; gap: 16px;">
-  <img alt="Windmill" src="https://raw.githubusercontent.com/StabilityNexus/Windmill-EVM-WebUI/main/public/windmill-logo.svg" width="120">
+  <img alt="Windmill" src="public/windmill-logo.svg" width="120">
   <img alt="Stability Nexus" src="public/stability.svg" width="175">
 </div>
 
