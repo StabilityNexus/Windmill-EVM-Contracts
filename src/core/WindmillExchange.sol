@@ -96,14 +96,19 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         emit OwnershipTransferred(oldOwner, newOwner);
     }
 
-    function _safeTransferTokenOrETH(address token, address to, uint256 amount) internal {
+    function _safeTransferTokenOrETH(address token, address to, uint256 amount) private {
+        if (amount == 0) return;
         if (token == WETH) {
-            IWETH(WETH).withdraw(amount);
-            (bool success,) = to.call{ value: amount }("");
-            if (!success) revert EthTransferFailed();
-        } else {
-            TokenTransfer.safeTransfer(token, to, amount);
+            if (address(this).balance < amount && IERC20(WETH).balanceOf(address(this)) >= amount) {
+                IWETH(WETH).withdraw(amount);
+            }
+            if (address(this).balance >= amount) {
+                (bool success,) = to.call{ value: amount }("");
+                if (!success) revert EthTransferFailed();
+                return;
+            }
         }
+        TokenTransfer.safeTransfer(token, to, amount);
     }
 
     event OrderCreated(
