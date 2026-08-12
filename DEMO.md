@@ -129,7 +129,7 @@ npm start
 ### Step 6: Automatic On-Chain Settlement
 
 1. Within **15–30 seconds**, the **Keeper Bot** running in Terminal 3 will detect that Buy Order #1 and Sell Order #2 overlap in price.
-2. The Keeper executes `matchOrders(buyOrderId, sellOrderId)` on the `WindmillExchange` contract.
+2. The Keeper executes `matchOrders(buyOrderId, sellOrderId, deadline)` on the `WindmillExchange` contract.
 3. On both WebUI dashboards (`:3000` and `:3001`):
    - Orders move automatically from **Active Orders** to **Settled History**.
    - Tokens (WETH/USDC) swap between Account 1 and Account 2 on-chain.
