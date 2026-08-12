@@ -1,11 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import { Order } from "../types/OrderTypes.sol";
+import { Order, OrderType } from "../types/OrderTypes.sol";
 
 interface IWindmillExchange {
     event ProtocolFeeUpdated(address indexed treasury, uint256 protocolFeeBps);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event PriceOracleUpdated(address indexed oracle);
+
+    function createOrder(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 startPrice,
+        int256 slope,
+        uint256 minPrice,
+        uint256 maxPrice,
+        uint256 expiry,
+        bool isBuy,
+        OrderType orderType,
+        uint256 triggerPrice
+    ) external payable returns (uint256 orderId);
 
     function createOrder(
         address tokenIn,
@@ -29,6 +44,10 @@ interface IWindmillExchange {
     function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external;
 
     function transferOwnership(address newOwner) external;
+
+    function setPriceOracle(address _oracle) external;
+
+    function priceOracle() external view returns (address);
 
     function currentPrice(uint256 orderId, uint256 timestamp) external view returns (uint256 price);
 
