@@ -19,6 +19,10 @@ lcov.info
 # Logs
 *.log
 
+# Foundry binaries (downloaded via download_foundry.ps1)
+*.exe
+foundry.zip
+
 # Editor and OS artifacts
 .DS_Store
 Thumbs.db

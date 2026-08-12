@@ -4,7 +4,6 @@
 <!-- Organization Logo -->
 <div align="center" style="display: flex; align-items: center; justify-content: center; gap: 16px;">
   <img alt="Stability Nexus" src="public/stability.svg" width="175">
-  <img src="public/todo-project-logo.svg" width="175" />
 </div>
 
 &nbsp;
@@ -12,9 +11,7 @@
 <!-- Organization Name -->
 <div align="center">
 
-[![Static Badge](https://img.shields.io/badge/Stability_Nexus-/TODO-228B22?style=for-the-badge&labelColor=FFC517)](https://TODO.stability.nexus/)
-
-<!-- Correct deployed url to be added -->
+[![Static Badge](https://img.shields.io/badge/Stability_Nexus-Windmill_Exchange-228B22?style=for-the-badge&labelColor=FFC517)](https://stability.nexus/)
 
 </div>
 
@@ -48,85 +45,32 @@
 ---
 
 <div align="center">
-<h1>TODO: Project Name</h1>
+<h1>Windmill Exchange</h1>
 </div>
 
-[TODO](https://TODO.stability.nexus/) is a ... TODO: Project Description.
+Windmill Exchange is a decentralized on-chain order matching engine with configurable dynamic pricing curves and autonomous keeper matching. 
 
 ---
 
 ## 🚀 Features
 
-TODO: List your main features here:
-
-- **Feature 1**: Description
-- **Feature 2**: Description
-- **Feature 3**: Description
-- **Feature 4**: Description
-
----
-
-## Project Maturity
-
-TODO: In the checklist below, mark the items that have been completed and delete items that are not applicable to the current project:
-
-- [ ] The protocol:
-  - [ ] has been described and formally specified in a paper.
-  - [ ] has had its main properties mathematically proven.
-  - [ ] has been formally verified.
-- [ ] The smart contracts:
-  - [ ] were thoroughly reviewed by at least two knights of The Stable Order.
-  - [ ] were deployed to:
-    - [ ] Ethereum Classic
-    - [ ] Ethereum
-    - [ ] Polygon
-    - [ ] BSC
-    - [ ] Base
+- **Decentralized Matchmaking**: Fully on-chain, transparent, and verifiable financial infrastructure.
+- **Dynamic Pricing Curves**: Orders autonomously adjust their prices over time, creating natural market convergence without requiring active participation.
+- **Keeper Ecosystem**: Autonomous keepers scan and match compatible orders using the O(N log N) two-pointer sweep algorithm. Run your own keeper node to earn fees.
+- **Multi-Chain Native**: Deploy across Ethereum, Polygon, BSC, Base, and more.
 
 ---
 
 ## Architecture
 
-> TODO: Replace with your actual contract architecture. Example below.
-
 ```text
-src/
-├── TODO_Contract.sol       # Core logic contract
-├── interfaces/
-│   └── ITODO_Contract.sol  # Interface definitions
-└── libraries/
-    └── TODO_Library.sol    # Shared utility library
-
-script/
-├── Deploy.s.sol            # Deployment script
-└── Interactions.s.sol      # Post-deploy interaction scripts
-
-test/
-├── unit/
-│   └── TODO_ContractTest.t.sol
-└── integration/
-    └── TODO_IntegrationTest.t.sol
+Windmill-EVM-Contracts/
+├── src/
+│   └── core/
+│       └── WindmillExchange.sol  # Core matching logic contract
+├── Windmill-EVM-Keeper2/         # Node.js autonomous keeper matching bot
+├── Windmill-EVM-WebUI/           # Next.js user interface
 ```
-
-> **Contract Diagram** (TODO: add a diagram or ASCII art showing contract relationships)
-You can create Web3 architecture diagrams using:
-
-- [Draw.io](https://draw.io)
-- [Excalidraw](https://excalidraw.com)
-- [Lucidchart](https://lucidchart.com)
-- [Mermaid](https://mermaid.js.org) (for code-based diagrams)
-
-Example structure to include:
-
-- Frontend (DApp UI built with React/Next.js)
-- Wallet integration (MetaMask, WalletConnect, Coinbase Wallet)
-- Web3 provider / RPC (Infura, Alchemy, QuickNode)
-- Smart contracts (Solidity contracts deployed on blockchain)
-- Blockchain network (Ethereum, Polygon, Arbitrum, etc.)
-- Decentralized storage (IPFS, Filecoin, Arweave)
-- Indexing services (The Graph or similar)
-- Optional backend services (Node.js APIs, relayers, indexing)
-- Data flow between the frontend, wallet, smart contracts, and blockchain
 
 ---
 
@@ -136,38 +80,15 @@ Example structure to include:
 |---|---|
 | Smart Contracts | Solidity `^0.8.x` |
 | Framework | [Foundry](https://getfoundry.sh/) (forge, cast, anvil) |
-| Libraries | OpenZeppelin (via `lib/`) |
-
----
-
-## Repository Structure
-
-```text
-.
-├── .github/
-│   └── workflows/           # CI, security, gas, fuzz, release pipelines
-├── lib/                     # Foundry dependencies (git submodules)
-├── public/                  # Logos and static assets
-├── script/                  # Forge deployment & interaction scripts
-├── src/                     # Solidity source contracts
-├── test/                    # Forge test suite
-├── .coderabbit.yaml         # CodeRabbit AI review config
-├── .env.example             # Environment variable template
-├── .gitmodules              # Submodule declarations
-├── foundry.toml             # Foundry project config (RPCs, verifiers)
-├── foundry.lock             # Locked dependency versions
-└── README.md
-```
+| Libraries | OpenZeppelin |
+| Keeper Node | Node.js, ethers.js |
+| Web UI | Next.js, React, Tailwind CSS |
 
 ---
 
 ## 🔗 Repository Links
 
-TODO: Update with your repository structure
-
-1. [Main Repository](https://github.com/StabilityNexus/TODO)
-2. [Frontend](https://github.com/StabilityNexus/TODO/tree/main/frontend) (if separate)
-3. [contract](https://github.com/StabilityNexus/TODO/tree/main/contract) (if separate)
+1. [Main Repository](https://github.com/StabilityNexus/Windmill-EVM-Contracts)
 
 ---
 
@@ -180,28 +101,7 @@ TODO: Update with your repository structure
 | `git` | any | [git-scm.com](https://git-scm.com/) |
 | `foundryup` | latest | See [getfoundry.sh](https://getfoundry.sh) |
 | `forge` / `cast` / `anvil` | latest | run `foundryup` after install |
-
-Verify installation:
-
-```bash
-forge --version   # e.g. forge 0.3.x
-anvil --version
-cast --version
-```
-
-### Installation
-
-```bash
-# 1. Clone with submodules
-git clone --recurse-submodules https://github.com/StabilityNexus/Template-Repo-EVM-Contracts.git
-cd Template-Repo-EVM-Contracts
-
-# 2. If you forgot --recurse-submodules
-git submodule update --init --recursive
-
-# 3. Install/update Foundry dependencies
-forge install
-```
+| `node` | 20+ | [nodejs.org](https://nodejs.org) |
 
 ### Environment Setup
 
@@ -227,13 +127,13 @@ RPC_SEPOLIA=https://sepolia.infura.io/v3/YOUR_KEY
 
 ## Usage
 
-### Build
+### Build Contracts
 
 ```bash
 forge build
 ```
 
-### Test
+### Test Contracts
 
 ```bash
 # Run all tests
@@ -241,83 +141,23 @@ forge test
 
 # Verbose output (shows logs and traces)
 forge test -vvv
-
-# Run a specific test file
-forge test --match-path test/unit/TODO_ContractTest.t.sol
-
-# Run a specific test function
-forge test --match-test testTransfer -vvv
 ```
 
-### Coverage
+### Run Web UI & Keeper Locally
 
-```bash
-forge coverage
+To run the Web UI interface and the autonomous keeper matching bot together on your laptop/machine:
 
-# Generate LCOV report
-forge coverage --report lcov
-genhtml lcov.info --output-directory coverage/
+```powershell
+# Setup and launch both the Web UI and Keeper in parallel windows
+powershell -ExecutionPolicy Bypass -File .\start_all.ps1
 ```
 
-### Gas Snapshot
+This will automatically create configuration templates, install dependencies, and launch the Web UI (on `http://localhost:3000/trade`) and the Keeper bot loop in two separate PowerShell windows.
 
-```bash
-# Generate snapshot
-forge snapshot
-
-# Compare against last snapshot
-forge snapshot --diff
-```
-
-### Format & Lint
-
-```bash
-forge fmt          # Format Solidity files
-forge fmt --check  # Check without writing (used in CI)
-```
-
----
-
-## Deployment
-
-> Make sure your `.env` is configured before deploying.
-
-### Testnet
-
-```bash
-# Deploy to Sepolia (Ethereum testnet)
-forge script script/Deploy.s.sol \
-  --rpc-url sepolia \
-  --broadcast \
-  --verify \
-  -vvvv
-
-# Deploy to Mordor (Ethereum Classic testnet)
-forge script script/Deploy.s.sol \
-  --rpc-url mordor \
-  --broadcast \
-  -vvvv
-```
-
-### Mainnet
-
-```bash
-# Deploy to Ethereum mainnet
-forge script script/Deploy.s.sol \
-  --rpc-url ethereum \
-  --broadcast \
-  --verify \
-  -vvvv
-
-# Deploy to Base
-forge script script/Deploy.s.sol \
-  --rpc-url base \
-  --broadcast \
-  --verify \
-  -vvvv
-```
-
-> ℹ️ RPC aliases (`sepolia`, `ethereum`, `base`, etc.) are pre-configured in `foundry.toml`.
+> [!NOTE]
+> Configure your environment variables:
+> - Web UI: Fill in `NEXT_PUBLIC_CONTRACT_ADDRESS_SEPOLIA` inside `Windmill-EVM-WebUI/.env.local`.
+> - Keeper: Fill in `PRIVATE_KEY` and `CONTRACT_ADDRESS` inside `Windmill-EVM-Keeper2/.env`.
 
 ---
 
@@ -337,42 +177,11 @@ Pre-configured RPC endpoints in `foundry.toml`.
 
 ---
 
-## CI/CD Workflows
-
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `ci.yml` | Push / PR | Format check → Build → Unit tests → Coverage report |
-| `security-slither.yml` | Push / PR | Slither static analysis for vulnerabilities |
-| `gas-snapshot.yml` | Push / PR | Gas baseline and regression checks |
-| `nightly-fuzz.yml` | Nightly (cron) | Deep fuzz & invariant testing |
-| `release.yml` | Tag push | Builds and publishes release artifacts |
-
----
-
-## Security
-
-- Static analysis is run on every PR via **Slither** (see `.github/workflows/security-slither.yml`)
-- **CodeRabbit** AI review is enabled via `.coderabbit.yaml`
-- Deep fuzz runs nightly to catch edge cases
-
-> Found a vulnerability? Please **do not open a public issue**. Contact the Stability Nexus team privately via [Discord](https://discord.gg/YzDKeEfWtS) or [Telegram](https://t.me/StabilityNexus).
-
----
-
 ## 🙌 Contributing
 
 ⭐ Don't forget to star this repository if you find it useful! ⭐
 
 Thank you for considering contributing to this project! Contributions are highly appreciated and welcomed. To ensure smooth collaboration, please refer to our [Contribution Guidelines](./CONTRIBUTING.md).
-
----
-
-## ✨ Maintainers
-
-TODO: Add maintainer information
-
-- [Maintainer Name](https://github.com/username)
-- [Maintainer Name](https://github.com/username)
 
 ---
 
@@ -384,8 +193,8 @@ See the [LICENSE](LICENSE) file for details.
 
 ## 💪 Thanks To All Contributors
 
-Thanks a lot for spending your time helping TODO grow. Keep rocking!
+Thanks a lot for spending your time helping Windmill Exchange grow. Keep rocking!
 
-[![Contributors](https://contrib.rocks/image?repo=StabilityNexus/TODO)](https://github.com/StabilityNexus/TODO/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=StabilityNexus/Windmill-EVM-Contracts)](https://github.com/StabilityNexus/Windmill-EVM-Contracts/graphs/contributors)
 
-© 2025 Stability Nexus
+© 2026 Stability Nexus
