@@ -115,6 +115,27 @@ contract MockWETH is MockERC20 {
     }
 }
 
+contract RejectETHReceiver {
+    function approveToken(address token, address spender) external {
+        MockERC20(token).approve(spender, type(uint256).max);
+    }
+
+    function createOrder(
+        WindmillExchange exchange,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 startPrice,
+        bool isBuy
+    ) external returns (uint256) {
+        return exchange.createOrder(tokenIn, tokenOut, amountIn, startPrice, 0, 0, 0, 0, isBuy);
+    }
+
+    receive() external payable {
+        revert("ETH not accepted");
+    }
+}
+
 contract WindmillExchangeTest is Test {
     uint256 internal constant RAY = 1e27;
 
@@ -744,6 +765,29 @@ contract WindmillExchangeTest is Test {
         exchange.createOrder{ value: 5 ether }(
             address(weth), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
         );
+    }
+
+    function test_nativeETH_revertOnFailedEthTransfer() public {
+        RejectETHReceiver rejecter = new RejectETHReceiver();
+        tokenB.mint(address(rejecter), 100 ether);
+        rejecter.approveToken(address(tokenB), address(exchange));
+
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder{ value: 100 ether }(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        uint256 sellId =
+            rejecter.createOrder(exchange, address(tokenB), address(weth), 100 ether, RAY, false);
+
+        vm.expectRevert(EthTransferFailed.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "buy order should still be active");
+        assertTrue(exchange.getOrder(sellId).active, "sell order should still be active");
+        assertEq(weth.balanceOf(address(exchange)), 100 ether, "WETH escrow should be intact");
+        assertEq(tokenB.balanceOf(address(exchange)), 100 ether, "tokenB escrow should be intact");
+        assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
     }
 
     function test_protocolFees_setFeeAndRespectCap() public {
