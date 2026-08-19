@@ -790,6 +790,48 @@ contract WindmillExchangeTest is Test {
         assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
     }
 
+    function test_nativeETH_skipUnwrapWhenPrefunded() public {
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder{ value: 100 ether }(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB), address(weth), 100 ether, RAY, 0, 0, 0, 0, false
+        );
+
+        uint256 sellerPayout = 99.9 ether;
+        uint256 keeperFee = 0.1 ether;
+        vm.deal(address(exchange), sellerPayout);
+
+        uint256 aliceBBefore = tokenB.balanceOf(alice);
+        uint256 bobETHBefore = bob.balance;
+        uint256 keeperETHBefore = address(this).balance;
+
+        vm.expectCall(address(weth), abi.encodeCall(MockWETH.withdraw, (sellerPayout)), 0);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertEq(bob.balance - bobETHBefore, sellerPayout, "seller should be paid in native ETH");
+        assertEq(
+            address(this).balance - keeperETHBefore,
+            keeperFee,
+            "keeper should be paid in native ETH"
+        );
+        assertEq(tokenB.balanceOf(alice) - aliceBBefore, 100 ether, "buyer should receive tokenB");
+
+        assertFalse(exchange.getOrder(buyId).active, "buy order should be filled");
+        assertFalse(exchange.getOrder(sellId).active, "sell order should be filled");
+
+        assertEq(
+            weth.balanceOf(address(exchange)),
+            100 ether - keeperFee,
+            "WETH escrow should only be unwrapped for the keeper fee"
+        );
+        assertEq(address(exchange).balance, 0, "pre-funded ETH should be fully spent");
+        assertEq(tokenB.balanceOf(address(exchange)), 0, "tokenB escrow should be fully released");
+    }
+
     function test_protocolFees_setFeeAndRespectCap() public {
         vm.prank(bob);
         vm.expectRevert(NotOwner.selector);
