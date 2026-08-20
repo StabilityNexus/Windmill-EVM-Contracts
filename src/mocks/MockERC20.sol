@@ -36,7 +36,7 @@ contract MockERC20 {
         balanceOf[msg.sender] -= amount;
         totalSupply -= amount;
         emit Transfer(msg.sender, address(0), amount);
-        (bool success, ) = msg.sender.call{ value: amount }("");
+        (bool success,) = msg.sender.call{ value: amount }("");
         require(success, "ETH transfer failed");
     }
 
