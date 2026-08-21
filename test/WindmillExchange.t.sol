@@ -701,6 +701,112 @@ contract WindmillExchangeTest is Test {
         assertEq(exchange.getOrder(buyId3).remainingIn, 50 ether);
     }
 
+    /// @notice The primary order's `remainingIn` is tracked in memory across the batch and
+    /// flushed to storage once; a partially-filled sell primary must land on the exact total.
+    function test_matchOrdersBatch_sellPrimary_partialFill_flushedOnce() public {
+        uint256 price = RAY;
+        uint256 sellId = _createSellOrder(bob, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(sellId).active, "primary should survive the batch");
+        assertEq(
+            exchange.getOrder(sellId).remainingIn,
+            100 ether,
+            "primary remaining must reflect all three fills"
+        );
+        for (uint256 i; i < counterOrderIds.length; i++) {
+            assertFalse(exchange.getOrder(counterOrderIds[i]).active);
+        }
+    }
+
+    /// @notice Counter orders keep their per-iteration storage write: a sell counter that
+    /// only partially fills must have its remainder persisted immediately.
+    function test_matchOrdersBatch_buyPrimary_partiallyFillsLastSellCounter() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 250 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(buyId).active);
+        assertFalse(exchange.getOrder(counterOrderIds[0]).active);
+        assertFalse(exchange.getOrder(counterOrderIds[1]).active);
+        assertTrue(exchange.getOrder(counterOrderIds[2]).active);
+        assertEq(exchange.getOrder(counterOrderIds[2]).remainingIn, 50 ether);
+    }
+
+    /// @notice Same deferred-flush path with the primary on the buy side.
+    function test_matchOrdersBatch_buyPrimary_partialFill_flushedOnce() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "primary should survive the batch");
+        assertEq(
+            exchange.getOrder(buyId).remainingIn,
+            100 ether,
+            "primary remaining must reflect all three fills"
+        );
+        for (uint256 i; i < counterOrderIds.length; i++) {
+            assertFalse(exchange.getOrder(counterOrderIds[i]).active);
+        }
+    }
+
+    /// @notice Deferring the storage write must not change the event stream: the primary
+    /// still reports its decreasing remainder once per counter order.
+    function test_matchOrdersBatch_emitsPrimaryPartialFillPerIteration() public {
+        uint256 price = RAY;
+        uint256 sellId = _createSellOrder(bob, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 300 ether);
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 200 ether);
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 100 ether);
+
+        exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
+    }
+
+    /// @notice A primary that fills before the batch is exhausted still rejects the whole
+    /// batch, because the in-memory copy is marked inactive exactly like the stored one.
+    function test_matchOrdersBatch_revert_primaryFilledBeforeBatchEnds() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 200 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        vm.expectRevert(OrderInactive.selector);
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "the whole batch must roll back");
+        assertEq(exchange.getOrder(buyId).remainingIn, 200 ether);
+    }
+
     function test_nativeETH_wrapOnDeposit() public {
         uint256 startBal = alice.balance;
         vm.prank(alice);
