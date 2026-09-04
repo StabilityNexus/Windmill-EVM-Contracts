@@ -896,6 +896,7 @@ contract WindmillExchangeTest is Test {
         assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
     }
 
+    /// @notice Verifies that prefunded ETH bypasses WETH withdrawal for the seller payout.
     function test_nativeETH_skipUnwrapWhenPrefunded() public {
         vm.prank(alice);
         uint256 buyId = exchange.createOrder{ value: 100 ether }(
@@ -936,6 +937,38 @@ contract WindmillExchangeTest is Test {
         );
         assertEq(address(exchange).balance, 0, "pre-funded ETH should be fully spent");
         assertEq(tokenB.balanceOf(address(exchange)), 0, "tokenB escrow should be fully released");
+    }
+
+    /// @notice Verifies that a rejected ETH payout reverts and rolls back when the exchange
+    /// pays from prefunded native ETH and skips the WETH withdrawal.
+    function test_nativeETH_revertOnFailedEthTransferWhenPrefunded() public {
+        RejectETHReceiver rejecter = new RejectETHReceiver();
+        tokenB.mint(address(rejecter), 100 ether);
+        rejecter.approveToken(address(tokenB), address(exchange));
+
+        vm.prank(alice);
+        uint256 buyId =
+            exchange.createOrder(address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
+
+        uint256 sellId =
+            rejecter.createOrder(exchange, address(tokenB), address(weth), 100 ether, RAY, false);
+
+        uint256 sellerPayout = 99.9 ether;
+        vm.deal(address(exchange), sellerPayout);
+
+        vm.expectCall(address(weth), abi.encodeWithSelector(MockWETH.withdraw.selector), 0);
+        vm.expectRevert(EthTransferFailed.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "buy order should still be active");
+        assertTrue(exchange.getOrder(sellId).active, "sell order should still be active");
+        assertEq(exchange.getOrder(buyId).remainingIn, 100 ether, "buy order should be unfilled");
+        assertEq(exchange.getOrder(sellId).remainingIn, 100 ether, "sell order should be unfilled");
+
+        assertEq(weth.balanceOf(address(exchange)), 100 ether, "WETH escrow should be intact");
+        assertEq(tokenB.balanceOf(address(exchange)), 100 ether, "tokenB escrow should be intact");
+        assertEq(address(exchange).balance, sellerPayout, "pre-funded ETH should be untouched");
+        assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
     }
 
     function test_protocolFees_setFeeAndRespectCap() public {
