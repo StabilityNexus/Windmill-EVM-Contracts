@@ -28,3 +28,11 @@ foundry.zip
 Thumbs.db
 .idea/
 .vscode/
+
+# Unremediated security review reports (private until findings are addressed)
+unremediated-security-reviews/
+
+# Local subprojects
+Windmill-EVM-Keeper2/
+Windmill-EVM-WebUI/
+
