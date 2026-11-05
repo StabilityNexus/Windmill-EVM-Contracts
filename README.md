@@ -77,9 +77,11 @@ src/
 │   ├── MathUtils.sol          # Safe math helpers
 │   ├── PriceCurve.sol         # Configurable dynamic pricing curves
 │   └── TokenTransfer.sol      # Reentrancy-aware token transfers
-└── storage/
-    ├── OrderStorage.sol       # Order book storage
-    └── PairStorage.sol        # Trading pair storage
+├── storage/
+│   ├── OrderStorage.sol       # Order book storage
+│   └── PairStorage.sol        # Trading pair storage
+└── types/
+    └── OrderTypes.sol         # Core structs (Order, OrderType)
 
 script/
 └── DeployWindmill.s.sol       # Deployment script (Foundry)
@@ -92,13 +94,13 @@ test/
 
 ```mermaid
 flowchart LR
-    U[User / Trader] -->|placeOrder| X(WindmillExchange)
-    K[Keeper Bot] -->|match/matchExecution| X
+    U[User / Trader] -->|createOrder| X(WindmillExchange)
+    K[Keeper Bot] -->|matchOrders / matchOrdersBatch| X
     X -->|store| OS[(OrderStorage)]
     X -->|price curve| PC[[PriceCurve]]
     X -->|transfer| TT[[TokenTransfer]]
     X -->|settle + pay keeper| U
-    K -.->|scan events| X
+    K -.->|scan OrderCreated events| X
 ```
 
 ---
@@ -180,7 +182,7 @@ forge test
 forge test -vvv
 
 # Run a specific test
-forge test --match-test testMatchOrders -vvv
+forge test --match-test test_matchOrders -vvv
 ```
 
 ### Coverage
