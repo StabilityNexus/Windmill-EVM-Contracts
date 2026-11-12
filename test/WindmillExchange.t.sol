@@ -646,6 +646,7 @@ contract WindmillExchangeTest is Test {
         assertEq(orders.length, 0);
     }
 
+    /// @notice Verifies pagination of orders by pair across consecutive pages and an empty terminal page.
     function test_ordersByPair_pagination_multiplePages() public {
         for (uint256 i = 0; i < 15; i++) {
             _createBuyOrder(alice, 10 ether, RAY, 0, 0);
