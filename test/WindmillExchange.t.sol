@@ -646,6 +646,32 @@ contract WindmillExchangeTest is Test {
         assertEq(orders.length, 0);
     }
 
+    /// @notice Verifies pagination of orders by pair across consecutive pages and an empty terminal page.
+    function test_ordersByPair_pagination_multiplePages() public {
+        for (uint256 i = 0; i < 15; i++) {
+            _createBuyOrder(alice, 10 ether, RAY, 0, 0);
+        }
+
+        uint256[] memory page1 = exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, 5);
+        assertEq(page1.length, 5);
+        assertEq(page1[0], 1);
+        assertEq(page1[4], 5);
+
+        uint256[] memory page2 = exchange.getOrdersByPair(address(tokenA), address(tokenB), 5, 5);
+        assertEq(page2.length, 5);
+        assertEq(page2[0], 6);
+        assertEq(page2[4], 10);
+
+        uint256[] memory page3 = exchange.getOrdersByPair(address(tokenA), address(tokenB), 10, 5);
+        assertEq(page3.length, 5);
+        assertEq(page3[0], 11);
+        assertEq(page3[4], 15);
+
+        uint256[] memory emptyPage =
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 15, 5);
+        assertEq(emptyPage.length, 0);
+    }
+
     receive() external payable { }
 
     // ----------------------------------------------------

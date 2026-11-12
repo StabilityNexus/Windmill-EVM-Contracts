@@ -33,11 +33,15 @@ abstract contract PairStorage {
         delete _pairIndex[key][orderId];
     }
 
-    function _getOrdersByPair(address tokenA, address tokenB)
+    function _getPairOrdersCount(address tokenA, address tokenB) internal view returns (uint256) {
+        return _pairOrders[pairKeyOf(tokenA, tokenB)].length;
+    }
+
+    function _getPairOrderIdAt(address tokenA, address tokenB, uint256 index)
         internal
         view
-        returns (uint256[] memory)
+        returns (uint256)
     {
-        return _pairOrders[pairKeyOf(tokenA, tokenB)];
+        return _pairOrders[pairKeyOf(tokenA, tokenB)][index];
     }
 }
