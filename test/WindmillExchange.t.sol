@@ -460,6 +460,7 @@ contract WindmillExchangeTest is Test {
         exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
 
+    /// @notice Reverts with KeeperDeadlineExpired when matchOrders is called past the keeper deadline.
     function test_matchOrders_revert_keeperDeadlineExpired() public {
         uint256 price = RAY;
         uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
@@ -819,6 +820,7 @@ contract WindmillExchangeTest is Test {
         assertEq(exchange.getOrder(buyId).remainingIn, 200 ether);
     }
 
+    /// @notice Reverts with KeeperDeadlineExpired when matchOrdersBatch is called past the keeper deadline.
     function test_matchOrdersBatch_revert_keeperDeadlineExpired() public {
         uint256 price = RAY;
         uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
@@ -830,6 +832,7 @@ contract WindmillExchangeTest is Test {
         exchange.matchOrdersBatch(buyId, counterOrderIds, 99);
     }
 
+    /// @notice Reverts with EmptyCounterOrders when matchOrdersBatch is called with an empty counter orders array.
     function test_matchOrdersBatch_revert_emptyCounterOrders() public {
         uint256 price = RAY;
         uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
