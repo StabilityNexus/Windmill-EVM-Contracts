@@ -3,6 +3,7 @@ pragma solidity ^0.8.23;
 
 import { Test } from "forge-std/Test.sol";
 import { WindmillExchange } from "../src/core/WindmillExchange.sol";
+import { MockERC20 as DecimalMockERC20 } from "../src/mocks/MockERC20.sol";
 import { Order } from "../src/types/OrderTypes.sol";
 import {
     ZeroAddress,
@@ -387,6 +388,44 @@ contract WindmillExchangeTest is Test {
             exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, type(uint256).max).length,
             0
         );
+    }
+
+    /// @dev Prices use raw quote units per raw base unit, scaled by RAY.
+    ///      3000 USDC (6 decimals) per WETH (18 decimals) is therefore 3e18, not 3000e27.
+    function test_matchOrders_success_mixedDecimalsNormalizedPrice() public {
+        DecimalMockERC20 base = new DecimalMockERC20("Wrapped Ether", "WETH", 18);
+        DecimalMockERC20 quote = new DecimalMockERC20("USD Coin", "USDC", 6);
+        uint256 baseAmount = 1e18;
+        uint256 quoteAmount = 3_000e6;
+        uint256 normalizedPrice = (quoteAmount * RAY) / baseAmount;
+        assertEq(normalizedPrice, 3e18, "price should account for the 12-decimal gap");
+
+        base.mint(alice, baseAmount);
+        quote.mint(bob, quoteAmount);
+        vm.prank(alice);
+        base.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        quote.approve(address(exchange), type(uint256).max);
+
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder(
+            address(base), address(quote), baseAmount, normalizedPrice, 0, 0, 0, 0, true
+        );
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(quote), address(base), quoteAmount, normalizedPrice, 0, 0, 0, 0, false
+        );
+
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        uint256 keeperFee = baseAmount / 1000;
+        assertEq(quote.balanceOf(alice), quoteAmount, "buyer should receive 3000 USDC");
+        assertEq(base.balanceOf(bob), baseAmount - keeperFee, "seller should receive 0.999 WETH");
+        assertEq(base.balanceOf(address(this)), keeperFee, "keeper should receive 0.001 WETH");
+        assertEq(base.balanceOf(address(exchange)), 0, "exchange should release all WETH");
+        assertEq(quote.balanceOf(address(exchange)), 0, "exchange should release all USDC");
+        assertFalse(exchange.getOrder(buyId).active, "buy should be inactive");
+        assertFalse(exchange.getOrder(sellId).active, "sell should be inactive");
     }
 
     // matchOrders — partial fills
