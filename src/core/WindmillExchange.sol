@@ -33,6 +33,8 @@ error InvalidProtocolFee();
 error MismatchedValue();
 error NativeEthNotSupported();
 error EthTransferFailed();
+error KeeperDeadlineExpired();
+error EmptyCounterOrders();
 
 interface IWETH {
     function deposit() external payable;
@@ -217,7 +219,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         nonReentrant
         whenNotPaused
     {
-        require(block.timestamp <= deadline, "Keeper deadline expired");
+        if (block.timestamp > deadline) revert KeeperDeadlineExpired();
         Order memory buy = _getOrderMem(buyOrderId);
         Order memory sell = _getOrderMem(sellOrderId);
 
@@ -273,9 +275,9 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         nonReentrant
         whenNotPaused
     {
-        require(block.timestamp <= deadline, "Keeper deadline expired");
+        if (block.timestamp > deadline) revert KeeperDeadlineExpired();
         uint256 len = counterOrderIds.length;
-        require(len > 0, "Empty counter orders");
+        if (len == 0) revert EmptyCounterOrders();
 
         // The primary order is loaded from storage once for the whole batch.  Its mutable
         // fields (`remainingIn`, `active`) are carried in memory across iterations and

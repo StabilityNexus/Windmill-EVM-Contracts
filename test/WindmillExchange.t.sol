@@ -25,7 +25,9 @@ import {
     InvalidProtocolFee,
     MismatchedValue,
     NativeEthNotSupported,
-    EthTransferFailed
+    EthTransferFailed,
+    KeeperDeadlineExpired,
+    EmptyCounterOrders
 } from "../src/core/WindmillExchange.sol";
 
 contract MockERC20 {
@@ -458,6 +460,17 @@ contract WindmillExchangeTest is Test {
         exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
 
+    /// @notice Reverts with KeeperDeadlineExpired when matchOrders is called past the keeper deadline.
+    function test_matchOrders_revert_keeperDeadlineExpired() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256 sellId = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        vm.warp(100);
+        vm.expectRevert(KeeperDeadlineExpired.selector);
+        exchange.matchOrders(buyId, sellId, 99);
+    }
+
     function test_matchOrders_revert_selfMatch() public {
         // Give alice tokenB as well so she can create both sides
         tokenB.mint(alice, 100 ether);
@@ -805,6 +818,28 @@ contract WindmillExchangeTest is Test {
 
         assertTrue(exchange.getOrder(buyId).active, "the whole batch must roll back");
         assertEq(exchange.getOrder(buyId).remainingIn, 200 ether);
+    }
+
+    /// @notice Reverts with KeeperDeadlineExpired when matchOrdersBatch is called past the keeper deadline.
+    function test_matchOrdersBatch_revert_keeperDeadlineExpired() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256[] memory counterOrderIds = new uint256[](1);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        vm.warp(100);
+        vm.expectRevert(KeeperDeadlineExpired.selector);
+        exchange.matchOrdersBatch(buyId, counterOrderIds, 99);
+    }
+
+    /// @notice Reverts with EmptyCounterOrders when matchOrdersBatch is called with an empty counter orders array.
+    function test_matchOrdersBatch_revert_emptyCounterOrders() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256[] memory emptyCounterOrderIds = new uint256[](0);
+
+        vm.expectRevert(EmptyCounterOrders.selector);
+        exchange.matchOrdersBatch(buyId, emptyCounterOrderIds, block.timestamp + 1);
     }
 
     function test_nativeETH_wrapOnDeposit() public {
