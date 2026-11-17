@@ -391,8 +391,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         if (limit > MAX_PAGE_SIZE) {
             limit = MAX_PAGE_SIZE;
         }
-        uint256[] memory all = _getOrdersByPair(tokenA, tokenB);
-        uint256 total = all.length;
+        uint256 total = _getPairOrdersCount(tokenA, tokenB);
 
         if (cursor >= total) {
             return new uint256[](0);
@@ -404,7 +403,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         uint256[] memory result = new uint256[](size);
 
         for (uint256 i; i < size; i++) {
-            result[i] = all[cursor + i];
+            result[i] = _getPairOrderIdAt(tokenA, tokenB, cursor + i);
         }
 
         return result;
