@@ -3,6 +3,7 @@ pragma solidity ^0.8.23;
 
 import { Test } from "forge-std/Test.sol";
 import { WindmillExchange } from "../src/core/WindmillExchange.sol";
+import { IWindmillExchange } from "../src/interfaces/IWindmillExchange.sol";
 import { Order } from "../src/types/OrderTypes.sol";
 import {
     ZeroAddress,
@@ -210,7 +211,9 @@ contract WindmillExchangeTest is Test {
         uint256 startPrice = 2 * RAY;
 
         vm.expectEmit(true, true, true, true);
-        emit WindmillExchange.OrderCreated(1, alice, address(tokenA), address(tokenB), amount, true);
+        emit IWindmillExchange.OrderCreated(
+            1, alice, address(tokenA), address(tokenB), amount, true
+        );
 
         uint256 id = _createBuyOrder(alice, amount, startPrice, 0, 0);
 
@@ -325,7 +328,7 @@ contract WindmillExchangeTest is Test {
         uint256 balBefore = tokenA.balanceOf(alice);
 
         vm.expectEmit(true, true, false, true);
-        emit WindmillExchange.OrderCancelled(id, alice, amount);
+        emit IWindmillExchange.OrderCancelled(id, alice, amount);
 
         vm.prank(alice);
         exchange.cancelOrder(id);
@@ -780,11 +783,11 @@ contract WindmillExchangeTest is Test {
         counterOrderIds[2] = _createBuyOrder(alice, 100 ether, price, 0, 0);
 
         vm.expectEmit(true, false, false, true, address(exchange));
-        emit WindmillExchange.OrderPartiallyFilled(sellId, 300 ether);
+        emit IWindmillExchange.OrderPartiallyFilled(sellId, 300 ether);
         vm.expectEmit(true, false, false, true, address(exchange));
-        emit WindmillExchange.OrderPartiallyFilled(sellId, 200 ether);
+        emit IWindmillExchange.OrderPartiallyFilled(sellId, 200 ether);
         vm.expectEmit(true, false, false, true, address(exchange));
-        emit WindmillExchange.OrderPartiallyFilled(sellId, 100 ether);
+        emit IWindmillExchange.OrderPartiallyFilled(sellId, 100 ether);
 
         exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
     }

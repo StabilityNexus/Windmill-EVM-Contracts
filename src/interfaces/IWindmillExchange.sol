@@ -6,6 +6,27 @@ import { Order } from "../types/OrderTypes.sol";
 interface IWindmillExchange {
     event ProtocolFeeUpdated(address indexed treasury, uint256 protocolFeeBps);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
+
+    event OrderCreated(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        bool isBuy
+    );
+    event OrderCancelled(uint256 indexed orderId, address indexed maker, uint256 refund);
+    event OrderMatched(
+        uint256 indexed buyOrderId,
+        uint256 indexed sellOrderId,
+        address indexed keeper,
+        uint256 settlementPrice,
+        uint256 executedQuantity
+    );
+    event OrderFilled(uint256 indexed orderId);
+    event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
 
     function createOrder(
         address tokenIn,
@@ -25,6 +46,14 @@ interface IWindmillExchange {
 
     function matchOrdersBatch(uint256 orderId, uint256[] calldata counterOrderIds, uint256 deadline)
         external;
+
+    /// @notice Pauses order creation and matching on the exchange.
+    /// @dev Only the contract owner can call this function. Order cancellation remains available while paused.
+    function pause() external;
+
+    /// @notice Unpauses the exchange, resuming order creation and matching.
+    /// @dev Only the contract owner can call this function.
+    function unpause() external;
 
     function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external;
 

@@ -46,9 +46,6 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
     address public treasury;
     uint256 public protocolFeeBps;
 
-    event Paused(address indexed by);
-    event Unpaused(address indexed by);
-
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
@@ -67,12 +64,14 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
 
     receive() external payable { }
 
-    function pause() external onlyOwner {
+    /// @inheritdoc IWindmillExchange
+    function pause() external override onlyOwner {
         paused = true;
         emit Paused(msg.sender);
     }
 
-    function unpause() external onlyOwner {
+    /// @inheritdoc IWindmillExchange
+    function unpause() external override onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
     }
@@ -110,25 +109,6 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         }
         TokenTransfer.safeTransfer(token, to, amount);
     }
-
-    event OrderCreated(
-        uint256 indexed orderId,
-        address indexed maker,
-        address indexed tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        bool isBuy
-    );
-    event OrderCancelled(uint256 indexed orderId, address indexed maker, uint256 refund);
-    event OrderMatched(
-        uint256 indexed buyOrderId,
-        uint256 indexed sellOrderId,
-        address indexed keeper,
-        uint256 settlementPrice,
-        uint256 executedQuantity
-    );
-    event OrderFilled(uint256 indexed orderId);
-    event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
 
     uint256 private constant MAX_LIFETIME = 315_360_000;
     uint256 private constant MAX_PAGE_SIZE = 500;
