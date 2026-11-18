@@ -47,8 +47,12 @@ interface IWindmillExchange {
     function matchOrdersBatch(uint256 orderId, uint256[] calldata counterOrderIds, uint256 deadline)
         external;
 
+    /// @notice Pauses order creation and matching on the exchange.
+    /// @dev Only the contract owner can call this function. Order cancellation remains available while paused.
     function pause() external;
 
+    /// @notice Unpauses the exchange, resuming order creation and matching.
+    /// @dev Only the contract owner can call this function.
     function unpause() external;
 
     function setProtocolFee(address _treasury, uint256 _protocolFeeBps) external;

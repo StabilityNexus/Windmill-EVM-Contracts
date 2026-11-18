@@ -64,11 +64,13 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
 
     receive() external payable { }
 
+    /// @inheritdoc IWindmillExchange
     function pause() external override onlyOwner {
         paused = true;
         emit Paused(msg.sender);
     }
 
+    /// @inheritdoc IWindmillExchange
     function unpause() external override onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
