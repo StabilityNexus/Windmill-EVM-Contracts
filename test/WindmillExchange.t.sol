@@ -27,6 +27,7 @@ import {
     NativeEthNotSupported,
     EthTransferFailed
 } from "../src/core/WindmillExchange.sol";
+import { OrderNotFound } from "../src/storage/OrderStorage.sol";
 
 contract MockERC20 {
     string public name;
@@ -352,6 +353,17 @@ contract WindmillExchangeTest is Test {
         vm.prank(alice);
         vm.expectRevert(OrderInactive.selector);
         exchange.cancelOrder(id);
+    }
+
+    function test_cancelOrder_revert_orderNotFound() public {
+        vm.prank(alice);
+        vm.expectRevert(OrderNotFound.selector);
+        exchange.cancelOrder(999);
+    }
+
+    function test_getOrder_revert_orderNotFound() public {
+        vm.expectRevert(OrderNotFound.selector);
+        exchange.getOrder(999);
     }
 
     // matchOrders — success (full fill)

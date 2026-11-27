@@ -25,18 +25,16 @@ abstract contract OrderStorage {
         return _orders[id];
     }
 
-    function _getOrderMem(uint256 id) internal view returns (Order memory) {
-        if (!_orderExists(id)) revert OrderNotFound();
-        return _orders[id];
+    function _getOrderMem(uint256 id) internal view returns (Order memory order) {
+        order = _orders[id];
+        if (order.maker == address(0)) revert OrderNotFound();
     }
 
     function _updateRemainingIn(uint256 id, uint256 newRemaining) internal {
-        if (!_orderExists(id)) revert OrderNotFound();
         _orders[id].remainingIn = newRemaining;
     }
 
     function _deactivateOrder(uint256 id) internal {
-        if (!_orderExists(id)) revert OrderNotFound();
         _orders[id].active = false;
     }
 
