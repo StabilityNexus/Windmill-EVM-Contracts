@@ -830,8 +830,11 @@ contract WindmillExchangeTest is Test {
         counterOrderIds[0] = validSellId;
         counterOrderIds[1] = 999;
 
-        uint256 aliceBalBefore = tokenA.balanceOf(alice);
-        uint256 bobBalBefore = tokenB.balanceOf(bob);
+        uint256 aliceTokenBBefore = tokenB.balanceOf(alice);
+        uint256 bobTokenABefore = tokenA.balanceOf(bob);
+        uint256 keeperTokenABefore = tokenA.balanceOf(address(this));
+        uint256 exchangeTokenABefore = tokenA.balanceOf(address(exchange));
+        uint256 exchangeTokenBBefore = tokenB.balanceOf(address(exchange));
 
         vm.expectRevert(OrderNotFound.selector);
         exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
@@ -842,8 +845,15 @@ contract WindmillExchangeTest is Test {
         );
         assertTrue(exchange.getOrder(buyId).active, "primary order must remain active");
         assertEq(exchange.getOrder(buyId).remainingIn, 100 ether, "primary remainingIn untouched");
-        assertEq(tokenA.balanceOf(alice), aliceBalBefore, "alice balance unchanged");
-        assertEq(tokenB.balanceOf(bob), bobBalBefore, "bob balance unchanged");
+        assertEq(tokenB.balanceOf(alice), aliceTokenBBefore, "alice tokenB unchanged");
+        assertEq(tokenA.balanceOf(bob), bobTokenABefore, "bob tokenA unchanged");
+        assertEq(tokenA.balanceOf(address(this)), keeperTokenABefore, "keeper tokenA unchanged");
+        assertEq(
+            tokenA.balanceOf(address(exchange)), exchangeTokenABefore, "exchange tokenA unchanged"
+        );
+        assertEq(
+            tokenB.balanceOf(address(exchange)), exchangeTokenBBefore, "exchange tokenB unchanged"
+        );
     }
 
     function test_nativeETH_wrapOnDeposit() public {

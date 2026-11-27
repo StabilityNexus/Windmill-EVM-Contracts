@@ -27,7 +27,7 @@ WindmillExchangeTest:test_matchOrdersBatch_buyAgainstMultipleSells() (gas: 10564
 WindmillExchangeTest:test_matchOrdersBatch_buyPrimary_partialFill_flushedOnce() (gas: 1134365)
 WindmillExchangeTest:test_matchOrdersBatch_buyPrimary_partiallyFillsLastSellCounter() (gas: 1135238)
 WindmillExchangeTest:test_matchOrdersBatch_emitsPrimaryPartialFillPerIteration() (gas: 1115636)
-WindmillExchangeTest:test_matchOrdersBatch_revert_missingCounterOrder_rollsBack() (gas: 693774)
+WindmillExchangeTest:test_matchOrdersBatch_revert_missingCounterOrder_rollsBack() (gas: 700684)
 WindmillExchangeTest:test_matchOrdersBatch_revert_primaryFilledBeforeBatchEnds() (gas: 1100041)
 WindmillExchangeTest:test_matchOrdersBatch_sellAgainstMultipleBuys() (gas: 1134749)
 WindmillExchangeTest:test_matchOrdersBatch_sellPrimary_partialFill_flushedOnce() (gas: 1134423)
