@@ -27,6 +27,7 @@ import {
     NativeEthNotSupported,
     EthTransferFailed
 } from "../src/core/WindmillExchange.sol";
+import { OrderNotFound } from "../src/storage/OrderStorage.sol";
 
 contract MockERC20 {
     string public name;
@@ -352,6 +353,17 @@ contract WindmillExchangeTest is Test {
         vm.prank(alice);
         vm.expectRevert(OrderInactive.selector);
         exchange.cancelOrder(id);
+    }
+
+    function test_cancelOrder_revert_orderNotFound() public {
+        vm.prank(alice);
+        vm.expectRevert(OrderNotFound.selector);
+        exchange.cancelOrder(999);
+    }
+
+    function test_getOrder_revert_orderNotFound() public {
+        vm.expectRevert(OrderNotFound.selector);
+        exchange.getOrder(999);
     }
 
     // matchOrders — success (full fill)
@@ -805,6 +817,43 @@ contract WindmillExchangeTest is Test {
 
         assertTrue(exchange.getOrder(buyId).active, "the whole batch must roll back");
         assertEq(exchange.getOrder(buyId).remainingIn, 200 ether);
+    }
+
+    /// @notice A batch that encounters a missing counter order reverts with OrderNotFound
+    /// and rolls back all state changes (balances and orders) from prior iterations.
+    function test_matchOrdersBatch_revert_missingCounterOrder_rollsBack() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256 validSellId = _createSellOrder(bob, 50 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](2);
+        counterOrderIds[0] = validSellId;
+        counterOrderIds[1] = 999;
+
+        uint256 aliceTokenBBefore = tokenB.balanceOf(alice);
+        uint256 bobTokenABefore = tokenA.balanceOf(bob);
+        uint256 keeperTokenABefore = tokenA.balanceOf(address(this));
+        uint256 exchangeTokenABefore = tokenA.balanceOf(address(exchange));
+        uint256 exchangeTokenBBefore = tokenB.balanceOf(address(exchange));
+
+        vm.expectRevert(OrderNotFound.selector);
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(validSellId).active, "valid counter order must remain active");
+        assertEq(
+            exchange.getOrder(validSellId).remainingIn, 50 ether, "counter remainingIn untouched"
+        );
+        assertTrue(exchange.getOrder(buyId).active, "primary order must remain active");
+        assertEq(exchange.getOrder(buyId).remainingIn, 100 ether, "primary remainingIn untouched");
+        assertEq(tokenB.balanceOf(alice), aliceTokenBBefore, "alice tokenB unchanged");
+        assertEq(tokenA.balanceOf(bob), bobTokenABefore, "bob tokenA unchanged");
+        assertEq(tokenA.balanceOf(address(this)), keeperTokenABefore, "keeper tokenA unchanged");
+        assertEq(
+            tokenA.balanceOf(address(exchange)), exchangeTokenABefore, "exchange tokenA unchanged"
+        );
+        assertEq(
+            tokenB.balanceOf(address(exchange)), exchangeTokenBBefore, "exchange tokenB unchanged"
+        );
     }
 
     function test_nativeETH_wrapOnDeposit() public {

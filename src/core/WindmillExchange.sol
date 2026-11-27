@@ -202,7 +202,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         address tokenOut = order.tokenOut;
 
         // Effects before interaction
-        _deactivateOrder(orderId);
+        order.active = false;
         _removeOrderFromPair(tokenIn, tokenOut, orderId);
 
         // Interaction
